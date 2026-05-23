@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Grid Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="header__brand">
+        <span class="header__mark" aria-hidden="true"></span>
+        <div>
+          <p class="header__eyebrow">ELEC50015 · Live telemetry</p>
+          <h1 class="header__title">Smart Grid Monitor</h1>
+        </div>
+      </div>
+      <div class="header__status">
+        <span class="status-pill" id="connection-status">
+          <span class="status-pill__dot"></span>
+          Connecting
+        </span>
+        <p class="header__meta">Cycle tick <strong id="header-tick">—</strong> / 59</p>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="metrics" aria-label="Live metrics">
+        <article class="metric-card metric-card--sun">
+          <div class="metric-card__top">
+            <h2>Solar irradiance</h2>
+            <span class="metric-card__unit">fraction of max</span>
+          </div>
+          <p class="metric-card__value" id="sun-value">—</p>
+          <div class="metric-card__bar" aria-hidden="true">
+            <div class="metric-card__bar-fill" id="sun-bar"></div>
+          </div>
+        </article>
+
+        <article class="metric-card metric-card--demand">
+          <div class="metric-card__top">
+            <h2>Instant demand</h2>
+            <span class="metric-card__unit">watts</span>
+          </div>
+          <p class="metric-card__value" id="demand-value">—</p>
+          <p class="metric-card__sub">Must be met now</p>
+        </article>
+
+        <article class="metric-card metric-card--buy">
+          <div class="metric-card__top">
+            <h2>Import price</h2>
+            <span class="metric-card__unit">buy from grid</span>
+          </div>
+          <p class="metric-card__value" id="buy-price-value">—</p>
+          <p class="metric-card__sub">Cost when drawing from grid</p>
+        </article>
+
+        <article class="metric-card metric-card--sell">
+          <div class="metric-card__top">
+            <h2>Export price</h2>
+            <span class="metric-card__unit">sell to grid</span>
+          </div>
+          <p class="metric-card__value" id="sell-price-value">—</p>
+          <p class="metric-card__sub">Revenue when exporting</p>
+        </article>
+      </section>
+
+      <section class="panel-grid">
+        <article class="panel panel--wide">
+          <div class="panel__header">
+            <div>
+              <h2>Deferrable loads</h2>
+              <p class="panel__desc">Flexible tasks that can run any time inside their window</p>
+            </div>
+            <span class="panel__badge" id="deferables-count">0 tasks</span>
+          </div>
+          <div class="timeline-ruler" aria-hidden="true">
+            <span>0</span><span>15</span><span>30</span><span>45</span><span>59</span>
+          </div>
+          <div class="deferables-list" id="deferables-list">
+            <p class="empty-state">Waiting for data…</p>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel__header">
+            <div>
+              <h2>Cycle position</h2>
+              <p class="panel__desc">Where we are in the 5-minute simulated day</p>
+            </div>
+          </div>
+          <div class="cycle-dial">
+            <svg viewBox="0 0 120 120" class="cycle-dial__svg" aria-hidden="true">
+              <circle cx="60" cy="60" r="48" class="cycle-dial__track"></circle>
+              <circle cx="60" cy="60" r="48" class="cycle-dial__progress" id="cycle-progress"></circle>
+            </svg>
+            <div class="cycle-dial__center">
+              <span class="cycle-dial__tick" id="cycle-tick">—</span>
+              <span class="cycle-dial__label">tick</span>
+            </div>
+          </div>
+          <dl class="detail-list">
+            <div>
+              <dt>Day ID</dt>
+              <dd id="day-id">—</dd>
+            </div>
+            <div>
+              <dt>Sun tick</dt>
+              <dd id="sun-tick">—</dd>
+            </div>
+            <div>
+              <dt>Price tick</dt>
+              <dd id="price-tick">—</dd>
+            </div>
+            <div>
+              <dt>Demand tick</dt>
+              <dd id="demand-tick">—</dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="panel panel--chart">
+        <div class="panel__header">
+          <div>
+            <h2>Previous cycle</h2>
+            <p class="panel__desc">Yesterday’s price and demand evolution across all 60 ticks</p>
+          </div>
+          <div class="chart-legend">
+            <span class="legend-item legend-item--demand">Demand (W)</span>
+            <span class="legend-item legend-item--buy">Buy price</span>
+            <span class="legend-item legend-item--sell">Sell price</span>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="history-chart" aria-label="Yesterday price and demand chart"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Last updated <time id="last-updated">—</time></p>
+      <p class="footer__note">Data refreshes every second · upstream ticks every 5 s</p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
