@@ -1,4 +1,4 @@
-const POLL_MS = 1000;
+const POLL_MS = 250;
 const CYCLE_TICKS = 59;
 const CIRCUMFERENCE = 2 * Math.PI * 48;
 
