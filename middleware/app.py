@@ -1,9 +1,17 @@
+from pathlib import Path
+
 from flask import Flask, jsonify, render_template
 import threading
 from state import cache, lock
 from poller import poll_loop
 
-app = Flask(__name__)
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+app = Flask(
+    __name__,
+    template_folder=str(ROOT_DIR / "templates"),
+    static_folder=str(ROOT_DIR / "static"),
+)
 
 @app.route("/api/state")
 def get_state():
