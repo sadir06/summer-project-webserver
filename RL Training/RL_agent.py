@@ -37,7 +37,7 @@ while not done:
     action = dist.sample() #randomly select an action
     logprob = dist.log_prob(action).sum() #compute log probability
 
-    nextObs, reward, terminated, truncated info = env.step(
+    nextObs, reward, terminated, truncated, info = env.step(
         torch.tanh(action).detach().numpy()) #step environment 
     #return next state, reward, whether day/episode has ended
 

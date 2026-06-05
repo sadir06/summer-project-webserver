@@ -17,7 +17,7 @@ class PolicyNet(nn.Module): # policy network class
             nn.Linear(obsDim, 128), #First linear layer -> mapping observations to hidden NN layer
             nn.ReLU(), #non linear activation
             nn.Linear(128,128), #Hidden Layer
-            nn.ReLU()
+            nn.ReLU() # Remove 2nd ReLU
         )
 
         self.mu = nn.Linear(128, actDim) #output layer for mean action values

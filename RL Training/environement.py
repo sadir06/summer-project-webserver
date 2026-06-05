@@ -8,7 +8,7 @@ import random #seeded random gen
 class SmartGridEnv(gym.Env):
 
     vBus = 15
-    supercapCF = 0.46
+    supercapCF = 0.5
 
     maxSupercapEn = (
         0.5 * supercapCF * (vBus ** 2)
