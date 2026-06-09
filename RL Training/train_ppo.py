@@ -1,3 +1,4 @@
+import argparse
 import time
 from collections import deque
 from pathlib import Path
@@ -7,14 +8,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from env4 import SmartGridEnv
-from load_days import SmartGridEnvReal, load_day_data
+from load_days import load_day_data, make_real_env
 from networks import PolicyNet, ValueNet
 
 RL_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = RL_DIR.parent
-CHECKPOINT_DIR = RL_DIR / "checkpoints"
-LOG_FILE = RL_DIR / "train_ppo.log"
 
 OBS_DIM = 14
 ACT_DIM = 3
@@ -35,10 +33,32 @@ ROLLING_WINDOW = 10
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def log(msg: str) -> None:
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train PPO on SmartGridEnv")
+    parser.add_argument(
+        "--prototype",
+        type=int,
+        default=2,
+        choices=[1, 2],
+        help="1=env4.py, 2=env4_prototype_2.py (default)",
+    )
+    return parser.parse_args()
+
+
+def load_env_module(prototype: int):
+    if prototype == 2:
+        from env4_prototype_2 import SmartGridEnv
+
+        return SmartGridEnv, "env4_prototype_2"
+    from env4 import SmartGridEnv
+
+    return SmartGridEnv, "env4"
+
+
+def log(msg: str, log_file: Path) -> None:
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
     print(line, flush=True)
-    with LOG_FILE.open("a", encoding="utf-8") as f:
+    with log_file.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
@@ -50,7 +70,7 @@ def clip_action(raw_action: np.ndarray) -> np.ndarray:
     return action
 
 
-def collect_rollout(env: SmartGridEnv, policy, value_net, episodes: int, device: torch.device):
+def collect_rollout(env, policy, value_net, episodes: int, device: torch.device):
     obs_buf, act_buf, logp_buf, rew_buf, val_buf, done_buf = [], [], [], [], [], []
     ep_costs = []
     ep_import = []
@@ -190,31 +210,43 @@ def ppo_update(policy, value_net, opt_policy, opt_value, batch):
 
 
 def main():
+    args = parse_args()
+    env_class, env_name = load_env_module(args.prototype)
+    checkpoint_dir = RL_DIR / "checkpoints" / f"prototype_{args.prototype}"
+    log_file = RL_DIR / "logs" / "train_ppo.log"
+
     torch.manual_seed(SEED)
     np.random.seed(SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(SEED)
 
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    LOG_FILE.write_text("", encoding="utf-8")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("", encoding="utf-8")
 
-    log(f"device={DEVICE}")
+    log(f"device={DEVICE}", log_file)
+    log(f"prototype={args.prototype} env={env_name}", log_file)
     if DEVICE.type == "cuda":
-        log(f"gpu={torch.cuda.get_device_name(0)}")
+        log(f"gpu={torch.cuda.get_device_name(0)}", log_file)
 
-    train_profiles, test_profiles, manifest = load_day_data(PROJECT_ROOT)
+    train_profiles, _test_profiles, manifest = load_day_data(PROJECT_ROOT)
     log(
         f"data: {manifest['total_complete_days']} complete days | "
         f"train={manifest['train_days']} test={manifest['test_days']} "
-        f"(80/20 seed={manifest['split_seed']})"
+        f"(80/20 seed={manifest['split_seed']})",
+        log_file,
     )
     log(
         "metrics: net_profit=-totalCost (higher=better) | "
         "import=grid spend | export=grid earnings | "
-        "unmet=Joules not served (lower=better) | def_done=tasks completed/3"
+        "unmet=Joules not served (lower=better) | def_done=tasks completed/3",
+        log_file,
     )
 
-    env = SmartGridEnvReal(train_profiles, seed=SEED)
+    EnvClass = make_real_env(
+        env_class, train_profiles, seed=SEED, prototype=args.prototype
+    )
+    env = EnvClass()
     policy = PolicyNet(OBS_DIM, ACT_DIM).to(DEVICE)
     value_net = ValueNet(OBS_DIM).to(DEVICE)
     opt_policy = optim.Adam(policy.parameters(), lr=LR)
@@ -225,7 +257,7 @@ def main():
 
     for update in range(1, TOTAL_UPDATES + 1):
         batch = collect_rollout(env, policy, value_net, EPISODES_PER_ROLLOUT, DEVICE)
-        p_loss, v_loss = ppo_update(policy, value_net, opt_policy, opt_value, batch)
+        _p_loss, _v_loss = ppo_update(policy, value_net, opt_policy, opt_value, batch)
 
         avg_cost = float(np.mean(batch["ep_costs"]))
         avg_profit = -avg_cost
@@ -247,17 +279,18 @@ def main():
             f"profit={avg_profit:+.1f} roll_profit={roll_profit:+.1f} | "
             f"import={avg_import:.1f} export={avg_export:.1f} | "
             f"unmet={avg_unmet:.0f} roll_unmet={roll_unmet:.0f} | "
-            f"def_done={avg_def_done:.1f}/3 reward={avg_reward:.0f}"
+            f"def_done={avg_def_done:.1f}/3 reward={avg_reward:.0f}",
+            log_file,
         )
 
         if update % 25 == 0:
-            torch.save(policy.state_dict(), CHECKPOINT_DIR / "policy_latest.pth")
-            torch.save(value_net.state_dict(), CHECKPOINT_DIR / "value_latest.pth")
-            log("saved checkpoints")
+            torch.save(policy.state_dict(), checkpoint_dir / "policy_latest.pth")
+            torch.save(value_net.state_dict(), checkpoint_dir / "value_latest.pth")
+            log("saved checkpoints", log_file)
 
-    torch.save(policy.state_dict(), CHECKPOINT_DIR / "policy_final.pth")
-    torch.save(value_net.state_dict(), CHECKPOINT_DIR / "value_final.pth")
-    log("training complete")
+    torch.save(policy.state_dict(), checkpoint_dir / "policy_final.pth")
+    torch.save(value_net.state_dict(), checkpoint_dir / "value_final.pth")
+    log("training complete", log_file)
 
 
 if __name__ == "__main__":

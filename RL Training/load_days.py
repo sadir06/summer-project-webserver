@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from env4 import SmartGridEnv
+from env4_prototype_2 import SmartGridEnv as SmartGridEnvProto2
 
 TICKS_PER_DAY = SmartGridEnv.ticksPerDay
 MAX_PRICE = 150.0
@@ -71,8 +72,15 @@ def load_split_manifest(project_root: Path, complete_days: dict[int, list[dict]]
     return ensure_train_test_split(complete_days, manifest_path)
 
 
+def sample_day_pv_gen(day_id: int) -> list[float]:
+    """Independent PV series per day (not derived from sun/irradiance)."""
+    rng = random.Random(day_id)
+    return [SmartGridEnvProto2.samplePvPower(rng) for _ in range(TICKS_PER_DAY)]
+
+
 def rows_to_day_profile(day_rows: list[dict]) -> dict:
     by_tick = {r["tick"]: r for r in day_rows}
+    day_id = day_rows[0]["day"]
 
     irradiance = []
     base_demand = []
@@ -97,13 +105,28 @@ def rows_to_day_profile(day_rows: list[dict]) -> dict:
     ]
 
     return {
-        "day_id": day_rows[0]["day"],
+        "day_id": day_id,
         "irradiance": irradiance,
+        "pvGen": sample_day_pv_gen(day_id),
         "baseDemand": base_demand,
         "buyPrice": buy_price,
         "sellPrice": sell_price,
         "deferables": deferables,
     }
+
+
+def profile_to_reset_options(profile: dict, prototype: int) -> dict:
+    options = {
+        "baseDemand": profile["baseDemand"],
+        "buyPrice": profile["buyPrice"],
+        "sellPrice": profile["sellPrice"],
+        "deferables": deepcopy(profile["deferables"]),
+    }
+    if prototype >= 2:
+        options["pvGen"] = profile["pvGen"]
+    else:
+        options["irradiance"] = profile["irradiance"]
+    return options
 
 
 def _profiles_for_ids(complete_days: dict[int, list[dict]], day_ids: list[int]) -> list[dict]:
@@ -131,24 +154,18 @@ def load_day_data(project_root: Path) -> tuple[list[dict], list[dict], dict]:
     return train_profiles, test_profiles, manifest
 
 
-def load_train_day_profiles(project_root: Path) -> list[dict]:
-    train_profiles, _, _ = load_day_data(project_root)
-    return train_profiles
+def make_real_env(env_class, day_profiles: list[dict], seed: int = 42, prototype: int = 2):
+    """Build a real-data wrapper for any SmartGridEnv subclass."""
 
+    class SmartGridEnvReal(env_class):
+        def __init__(self):
+            super().__init__()
+            self.day_profiles = day_profiles
+            self._rng = random.Random(seed)
 
-class SmartGridEnvReal(SmartGridEnv):
-    def __init__(self, day_profiles: list[dict], seed: int = 42):
-        super().__init__()
-        self.day_profiles = day_profiles
-        self._rng = random.Random(seed)
+        def reset(self, seed=None, options=None):
+            profile = self._rng.choice(self.day_profiles)
+            day_options = profile_to_reset_options(profile, prototype)
+            return super().reset(seed=seed, options=day_options)
 
-    def reset(self, seed=None, options=None):
-        profile = self._rng.choice(self.day_profiles)
-        day_options = {
-            "irradiance": profile["irradiance"],
-            "baseDemand": profile["baseDemand"],
-            "buyPrice": profile["buyPrice"],
-            "sellPrice": profile["sellPrice"],
-            "deferables": deepcopy(profile["deferables"]),
-        }
-        return super().reset(seed=seed, options=day_options)
+    return SmartGridEnvReal
