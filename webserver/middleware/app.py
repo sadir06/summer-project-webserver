@@ -1,16 +1,17 @@
 from pathlib import Path
+import threading
 
 from flask import Flask, jsonify, render_template
-import threading
-from state import cache, lock
-from poller import poll_loop
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+from webserver.middleware.poller import poll_loop
+from webserver.middleware.state import cache, lock
+
+WEBSERVER_DIR = Path(__file__).resolve().parent.parent
 
 app = Flask(
     __name__,
-    template_folder=str(ROOT_DIR / "templates"),
-    static_folder=str(ROOT_DIR / "static"),
+    template_folder=str(WEBSERVER_DIR / "templates"),
+    static_folder=str(WEBSERVER_DIR / "static"),
 )
 
 @app.route("/api/state")

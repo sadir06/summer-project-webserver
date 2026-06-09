@@ -2,15 +2,18 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 import requests
+
+if __package__:
+    from .paths import DATA_DIR
+else:
+    from paths import DATA_DIR
 
 BASE_URL = "https://icelec50015.azurewebsites.net"
 POLL_INTERVAL_SEC = 4.5
 REQUEST_TIMEOUT_SEC = 10
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
 OUTPUT_FILE = DATA_DIR / "ticks.jsonl"
 LOG_FILE = DATA_DIR / "collector.log"
 

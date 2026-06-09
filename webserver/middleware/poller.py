@@ -4,7 +4,7 @@
 import requests
 import time
 from datetime import datetime, timezone
-from state import cache, lock
+from webserver.middleware.state import cache, lock
 
 BASE_URL = "https://icelec50015.azurewebsites.net"
 

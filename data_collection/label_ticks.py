@@ -7,7 +7,11 @@ from pathlib import Path
 
 import numpy as np
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+if __package__:
+    from .paths import DATA_DIR
+else:
+    from paths import DATA_DIR
+
 INPUT_FILE = DATA_DIR / "ticks.jsonl"
 TRAIN_OUTPUT = DATA_DIR / "labelled_train.jsonl"
 TEST_OUTPUT = DATA_DIR / "labelled_test.jsonl"

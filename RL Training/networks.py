@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class PolicyNet(nn.Module):
-    def __init__(self, obs_dim: int = 14, act_dim: int = 2, hidden: int = 128):
+    def __init__(self, obs_dim: int = 14, act_dim: int = 3, hidden: int = 128):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden),
