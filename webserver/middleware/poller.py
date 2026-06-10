@@ -1,52 +1,53 @@
-# JS cannot directly read from the web server, so we need to poll the server using Python, and then pass the data 
-# to the frontend via Flask. 
+# JS cannot directly read from the web server, so we poll Azure + Pico boards in Python
+# and pass the merged cache to the frontend via Flask.
 
-import requests
 import time
 from datetime import datetime, timezone
+
+import requests
+
+from hardware.poller import poll_hardware
 from webserver.middleware.state import cache, lock
 
 BASE_URL = "https://icelec50015.azurewebsites.net"
 
+cloud_counter = 0
+
 
 def poll_loop():
+    global cloud_counter
+
     while True:
-        try:    
-            response_sun = requests.get(f"{BASE_URL}/sun", timeout=5)
-            response_price = requests.get(f"{BASE_URL}/price", timeout=5)
-            response_demand = requests.get(f"{BASE_URL}/demand", timeout=5)
-            response_deferables = requests.get(f"{BASE_URL}/deferables", timeout=5)
-            response_yesterday = requests.get(f"{BASE_URL}/yesterday", timeout=5)
+        if cloud_counter == 0:
+            try:
+                response_sun = requests.get(f"{BASE_URL}/sun", timeout=5)
+                response_price = requests.get(f"{BASE_URL}/price", timeout=5)
+                response_demand = requests.get(f"{BASE_URL}/demand", timeout=5)
+                response_deferables = requests.get(f"{BASE_URL}/deferables", timeout=5)
+                response_yesterday = requests.get(f"{BASE_URL}/yesterday", timeout=5)
 
-            response_sun.raise_for_status()
-            response_price.raise_for_status()
-            response_demand.raise_for_status()
-            response_deferables.raise_for_status()
-            response_yesterday.raise_for_status()
+                response_sun.raise_for_status()
+                response_price.raise_for_status()
+                response_demand.raise_for_status()
+                response_deferables.raise_for_status()
+                response_yesterday.raise_for_status()
 
-            with lock: # Fetch the data, lock and update the cache
+                with lock:
+                    cache["sun"] = response_sun.json()
+                    cache["price"] = response_price.json()
+                    cache["demand"] = response_demand.json()
+                    cache["deferables"] = response_deferables.json()
+                    cache["yesterday"] = response_yesterday.json()
+                    cache["last_updated"] = datetime.now(timezone.utc).isoformat()
 
-                data_sun = response_sun.json()
-                data_price = response_price.json()
-                data_demand = response_demand.json()
-                data_deferables = response_deferables.json()
-                data_yesterday = response_yesterday.json()
+            except Exception as e:
+                print(f"Error polling main webserver data: {e}")
+                with lock:
+                    cache["last_updated"] = datetime.now(timezone.utc).isoformat()
 
-                cache["sun"] = data_sun
-                cache["price"] = data_price
-                cache["demand"] = data_demand
-                cache["deferables"] = data_deferables
-                cache["yesterday"] = data_yesterday
-                cache["last_updated"] = datetime.now(timezone.utc).isoformat() # ISO format is what the frontend expects
-        except Exception as e:
-            print(f"Error polling data: {e}")
-            with lock:
-                cache["last_updated"] = datetime.now(timezone.utc).isoformat()
-            
-        time.sleep(1) # Sleep for 1 second
+        cloud_counter += 1
+        if cloud_counter >= 5:
+            cloud_counter = 0
 
-        
-
-
-
-
+        poll_hardware(cache, lock)
+        time.sleep(1)

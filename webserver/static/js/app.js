@@ -1,4 +1,4 @@
-const POLL_MS = 250;
+const POLL_MS = 1000;
 const CYCLE_TICKS = 59;
 const CIRCUMFERENCE = 2 * Math.PI * 48;
 
@@ -7,6 +7,8 @@ const els = {
   headerTick: document.getElementById("header-tick"),
   sunValue: document.getElementById("sun-value"),
   sunBar: document.getElementById("sun-bar"),
+  vcapValue: document.getElementById("vcap-bottom-value"),
+  pcapValue: document.getElementById("pcout-bottom-value"),
   demandValue: document.getElementById("demand-value"),
   buyPriceValue: document.getElementById("buy-price-value"),
   sellPriceValue: document.getElementById("sell-price-value"),
@@ -26,7 +28,7 @@ let historyChart = null;
 let lastYesterdayJson = "";
 
 function formatNumber(value, digits = 2) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return Number(value).toLocaleString(undefined, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -34,7 +36,7 @@ function formatNumber(value, digits = 2) {
 }
 
 function formatInt(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return Number(value).toLocaleString();
 }
 
@@ -85,8 +87,13 @@ function renderDeferables(deferables, currentTick) {
       const start = Number(item.start);
       const end = Number(item.end);
       const energy = Number(item.energy);
-      const left = (start / CYCLE_TICKS) * 100;
-      const width = Math.max(((end - start) / CYCLE_TICKS) * 100, 1.5);
+
+      const left = Number.isFinite(start) ? (start / CYCLE_TICKS) * 100 : 0;
+      const width =
+        Number.isFinite(start) && Number.isFinite(end)
+          ? Math.max(((end - start) / CYCLE_TICKS) * 100, 1.5)
+          : 1.5;
+
       const nowLeft = Number.isFinite(currentTick) ? (currentTick / CYCLE_TICKS) * 100 : null;
 
       return `
@@ -225,27 +232,52 @@ function buildHistoryChart(yesterday) {
 }
 
 function renderState(state) {
-  const sun = state.sun ?? {};
+  const pvout = Number(state.pvout);
+  const vcap = Number(state.vcap);
+  const pcap = Number(state.pcout);
   const price = state.price ?? {};
   const demand = state.demand ?? {};
   const deferables = state.deferables ?? [];
   const yesterday = state.yesterday ?? [];
 
-  const sunFraction = Number(sun.sun);
-  setText(els.sunValue, Number.isFinite(sunFraction) ? formatNumber(sunFraction, 3) : "—");
-  els.sunBar.style.width = Number.isFinite(sunFraction) ? `${Math.min(sunFraction, 1) * 100}%` : "0%";
+  // Display Pico pvout where sun used to be displayed
+  setText(els.sunValue, Number.isFinite(pvout) ? `${formatNumber(pvout, 3)} W` : "—");
 
-  setText(els.demandValue, Number.isFinite(Number(demand.demand)) ? formatNumber(demand.demand, 2) : "—");
-  setText(els.buyPriceValue, Number.isFinite(Number(price.buy_price)) ? formatInt(price.buy_price) : "—");
-  setText(els.sellPriceValue, Number.isFinite(Number(price.sell_price)) ? formatInt(price.sell_price) : "—");
+  // Bar assumes max PV panel power is 8 W
+  els.sunBar.style.width = Number.isFinite(pvout)
+    ? `${Math.min(Math.max(pvout / 8, 0), 1) * 100}%`
+    : "0%";
 
-  const primaryTick = [demand.tick, price.tick, sun.tick].find((t) => Number.isFinite(Number(t)));
+  setText(els.vcapValue, Number.isFinite(vcap) ? `${formatNumber(vcap, 3)} V` : "—");
+  setText(els.pcapValue, Number.isFinite(pcap) ? `${formatNumber(pcap, 3)} W` : "—");
+
+  setText(
+    els.demandValue,
+    Number.isFinite(Number(demand.demand)) ? formatNumber(demand.demand, 2) : "—"
+  );
+
+  setText(
+    els.buyPriceValue,
+    Number.isFinite(Number(price.buy_price)) ? formatInt(price.buy_price) : "—"
+  );
+
+  setText(
+    els.sellPriceValue,
+    Number.isFinite(Number(price.sell_price)) ? formatInt(price.sell_price) : "—"
+  );
+
+  // Use demand or price tick. Sun has been removed.
+  const primaryTick = [demand.tick, price.tick].find((t) => Number.isFinite(Number(t)));
   const tickNum = Number(primaryTick);
+
   setText(els.headerTick, Number.isFinite(tickNum) ? String(tickNum) : "—", false);
   updateCycleDial(Number.isFinite(tickNum) ? tickNum : null);
 
   setText(els.dayId, price.day ?? demand.day ?? "—", false);
-  setText(els.sunTick, sun.tick ?? "—", false);
+
+  // Reuse the old sun tick field to show PV output source/status
+  setText(els.sunTick, Number.isFinite(pvout) ? "PV" : "—", false);
+
   setText(els.priceTick, price.tick ?? "—", false);
   setText(els.demandTick, demand.tick ?? "—", false);
 
@@ -272,6 +304,12 @@ async function poll() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const state = await response.json();
+
+    console.log("STATE:", state);
+    console.log("PVOUT:", state.pvout);
+    console.log("VCAP:", state.vcap);
+    console.log("PCOUT:", state.pcout);
+
     renderState(state);
     setConnectionState(true, "Live");
   } catch (err) {

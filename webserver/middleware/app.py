@@ -14,17 +14,36 @@ app = Flask(
     static_folder=str(WEBSERVER_DIR / "static"),
 )
 
+
 @app.route("/api/state")
 def get_state():
     with lock:
-        return jsonify(cache) # Return the cache as a JSON object
-    
+        return jsonify(cache)
+
+
+@app.route("/api/sun_data")
+def get_sun_data():
+    with lock:
+        sun_data = cache.get("sun")
+
+        if isinstance(sun_data, dict):
+            sun_value = sun_data.get("sun")
+            sun_tick = sun_data.get("tick")
+        else:
+            sun_value = sun_data
+            sun_tick = None
+
+    return jsonify({
+        "sun": sun_value,
+        "tick": sun_tick,
+    })
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
 if __name__ == "__main__":
-    threading.Thread(target=poll_loop, daemon=True).start() # Start the polling loop in a separate thread
+    threading.Thread(target=poll_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=8000)
-

@@ -32,8 +32,8 @@
       <section class="metrics" aria-label="Live metrics">
         <article class="metric-card metric-card--sun">
           <div class="metric-card__top">
-            <h2>Solar irradiance</h2>
-            <span class="metric-card__unit">fraction of max</span>
+            <h2>PV Panel -Pout</h2>
+            <span class="metric-card__unit">W</span>
           </div>
           <p class="metric-card__value" id="sun-value">—</p>
           <div class="metric-card__bar" aria-hidden="true">
@@ -139,6 +139,26 @@
         <div class="chart-wrap">
           <canvas id="history-chart" aria-label="Yesterday price and demand chart"></canvas>
         </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2>Capacitor Pico</h2>
+            <p class="panel__desc">Live capacitor power and voltage readings</p>
+          </div>
+        </div>
+
+        <dl class="detail-list">
+          <div>
+            <dt>Capacitor power</dt>
+            <dd id="pcout-bottom-value">—</dd>
+          </div>
+          <div>
+            <dt>Capacitor voltage</dt>
+            <dd id="vcap-bottom-value">—</dd>
+          </div>
+        </dl>
       </section>
     </main>
 
