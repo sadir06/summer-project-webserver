@@ -5,11 +5,12 @@ import random
 
 
 class SmartGridEnv(gym.Env):
-    """Prototype 3 (frozen): profit-driven arbitrage — H100 run reached +profit ~update 174.
+    """Prototype 4: proto 3 + defer price gate + dynamic burst power cap.
 
-  DO NOT change physics/reward knobs here; use env4_prototype_4.py for experiments.
-  Training data from ticks.jsonl. Two actions: scAction, defAction. Auto PSU.
-  Tuned knobs: profitRewardScale=50, deferMissPenalty=5, defDemandATicks=15, maxDefPower=8.
+  Builds on the profitable proto 3 reward design. Adds:
+  - Dynamic defer power = min(hardware max, remaining_J / tickDur)
+  - Price gate: defer only when buy <= window average or deadline forces serve
+  - maxDefPower = 10 W (50 J in one 5 s tick)
   """
 
     # Supercapacitor physical model (hardware-aligned)
@@ -40,7 +41,11 @@ class SmartGridEnv(gym.Env):
 
     maxScCharge = 3.0
     maxScDischarge = 3.0
-    maxDefPower = 8.0
+    # Hardware max defer serving power (W). 50 J in one 5 s tick = 10 W.
+    maxDefPower = 10.0
+
+    # If True, defer is only served when buy is cheap vs remaining window or deadline is tight.
+    deferPriceGateEnabled = True
 
     priceLookaheadTicks = 6
 
@@ -224,6 +229,57 @@ class SmartGridEnv(gym.Env):
         self.supercapEn -= delivered / self.scEfficiency
         return delivered
 
+    def _active_defer_remaining_j(self) -> float:
+        total = 0.0
+        for dd in self.dailyData["defDemandState"]:
+            if dd["remainingEn"] <= 0.0:
+                continue
+            if dd["startTick"] <= self.curTick <= dd["endTick"]:
+                total += dd["remainingEn"]
+        return total
+
+    def _tick_max_def_power_w(self) -> float:
+        """Max defer power this tick: min(hardware cap, burst to clear active defer in one tick)."""
+        remaining_j = self._active_defer_remaining_j()
+        if remaining_j <= 0.0:
+            return 0.0
+        burst_w = remaining_j / self.tickDur
+        return min(self.maxDefPower, burst_w)
+
+    def _defer_must_serve_now(self, dd: dict) -> bool:
+        if dd["remainingEn"] <= 0.0:
+            return False
+        if not (dd["startTick"] <= self.curTick <= dd["endTick"]):
+            return False
+        max_j_per_tick = self._tick_max_def_power_w() * self.tickDur
+        if max_j_per_tick <= 0.0:
+            return True
+        remaining_ticks = max(1, dd["endTick"] - self.curTick + 1)
+        ticks_needed = int(np.ceil(dd["remainingEn"] / max_j_per_tick))
+        return ticks_needed >= remaining_ticks
+
+    def _defer_price_gate_open(self, buy_price: float) -> bool:
+        """Allow defer serving when price is favourable or a deadline forces action."""
+        if not self.deferPriceGateEnabled:
+            return True
+        for dd in self.dailyData["defDemandState"]:
+            if self._defer_must_serve_now(dd):
+                return True
+        active_ends = [
+            dd["endTick"]
+            for dd in self.dailyData["defDemandState"]
+            if dd["remainingEn"] > 0.0
+            and dd["startTick"] <= self.curTick <= dd["endTick"]
+        ]
+        if not active_ends:
+            return False
+        window_end = max(active_ends)
+        remaining_prices = self.dailyData["buyPrice"][self.curTick : window_end + 1]
+        if not remaining_prices:
+            remaining_prices = [buy_price]
+        avg_remaining = float(np.mean(remaining_prices))
+        return buy_price <= avg_remaining
+
     def _serve_deferrables(self, def_capacity_j: float) -> float:
         served_total = 0.0
         remaining_capacity = def_capacity_j
@@ -349,7 +405,9 @@ class SmartGridEnv(gym.Env):
         pv_en = pv_gen * self.tickDur
         base_demand_en = base_demand * self.tickDur
 
-        def_capacity = def_action * self.maxDefPower * self.tickDur
+        tick_def_power_w = self._tick_max_def_power_w()
+        defer_gate = 1.0 if self._defer_price_gate_open(buy_price) else 0.0
+        def_capacity = def_action * defer_gate * tick_def_power_w * self.tickDur
         def_en_served = self._serve_deferrables(def_capacity)
         demand_en = base_demand_en + def_en_served
 
@@ -467,6 +525,8 @@ class SmartGridEnv(gym.Env):
                 "gridToSc": grid_to_sc,
                 "scAction": sc_action,
                 "defAction": def_action,
+                "deferGateOpen": defer_gate > 0.0,
+                "tickMaxDefPowerW": tick_def_power_w,
             }
         )
         return self.getObs(), reward, terminated, False, info

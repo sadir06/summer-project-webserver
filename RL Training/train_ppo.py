@@ -18,6 +18,7 @@ OBS_DIM = 14
 
 TOTAL_UPDATES = 500
 EPISODES_PER_ROLLOUT = 32
+NUM_ENVS = 16
 PPO_EPOCHS = 4
 CLIP_EPS = 0.2
 GAMMA = 0.99
@@ -38,8 +39,21 @@ def parse_args():
         "--prototype",
         type=int,
         default=2,
-        choices=[1, 2, 3],
-        help="1=env4.py, 2=env4_prototype_2.py, 3=env4_prototype_3.py (default 2)",
+        choices=[1, 2, 3, 4],
+        help="1=env4, 2=proto2, 3=proto3 (frozen), 4=proto4 (default 2)",
+    )
+    parser.add_argument("--updates", type=int, default=TOTAL_UPDATES)
+    parser.add_argument("--episodes", type=int, default=EPISODES_PER_ROLLOUT)
+    parser.add_argument(
+        "--num-envs",
+        type=int,
+        default=NUM_ENVS,
+        help="Parallel envs for batched GPU inference (CPU-bound sim)",
+    )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="torch.compile policy/value nets (PyTorch 2+)",
     )
     return parser.parse_args()
 
@@ -49,6 +63,10 @@ def act_dim_for_prototype(prototype: int) -> int:
 
 
 def load_env_module(prototype: int):
+    if prototype == 4:
+        from env4_prototype_4 import SmartGridEnv
+
+        return SmartGridEnv, "env4_prototype_4"
     if prototype == 3:
         from env4_prototype_3 import SmartGridEnv
 
@@ -81,10 +99,27 @@ def clip_action(raw_action: np.ndarray, prototype: int) -> np.ndarray:
     return action
 
 
-def collect_rollout(
-    env, policy, value_net, episodes: int, device: torch.device, prototype: int
+def collect_rollout_batched(
+    envs,
+    policy,
+    value_net,
+    episodes: int,
+    device: torch.device,
+    prototype: int,
 ):
-    obs_buf, act_buf, logp_buf, rew_buf, val_buf, done_buf = [], [], [], [], [], []
+    """Roll out with N parallel envs and one batched GPU forward per step."""
+    num_envs = len(envs)
+    ticks_per_day = envs[0].ticksPerDay
+    target_episodes = episodes
+    finished_episodes = 0
+
+    obs_list = []
+    act_list = []
+    logp_list = []
+    rew_list = []
+    val_list = []
+    done_list = []
+
     ep_costs = []
     ep_import = []
     ep_export = []
@@ -93,71 +128,80 @@ def collect_rollout(
     ep_unmet_def = []
     ep_def_done = []
 
+    obs = np.zeros((num_envs, OBS_DIM), dtype=np.float32)
+    for i, env in enumerate(envs):
+        obs[i], _ = env.reset()
+
+    day_import = np.zeros(num_envs, dtype=np.float64)
+    day_export = np.zeros(num_envs, dtype=np.float64)
+    day_reward = np.zeros(num_envs, dtype=np.float64)
+
     policy.eval()
     value_net.eval()
 
-    for _ in range(episodes):
-        obs, _info = env.reset()
-        day_import = 0.0
-        day_export = 0.0
-        day_reward = 0.0
+    with torch.inference_mode():
+        while finished_episodes < target_episodes:
+            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            mu, std = policy(obs_t)
+            dist = torch.distributions.Normal(mu, std)
+            raw_action = dist.sample()
+            logp = dist.log_prob(raw_action).sum(dim=-1)
+            values = value_net(obs_t)
 
-        for _tick in range(env.ticksPerDay):
-            obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
+            raw_np = raw_action.cpu().numpy()
+            logp_np = logp.cpu().numpy()
+            val_np = values.cpu().numpy()
 
-            with torch.no_grad():
-                mu, std = policy(obs_t)
-                dist = torch.distributions.Normal(mu, std)
-                raw_action = dist.sample()
-                logp = dist.log_prob(raw_action).sum()
-                v = value_net(obs_t)
+            for i, env in enumerate(envs):
+                if finished_episodes >= target_episodes:
+                    break
 
-            action = clip_action(raw_action.cpu().numpy(), prototype)
-            next_obs, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
+                action = clip_action(raw_np[i], prototype)
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
 
-            obs_buf.append(obs)
-            act_buf.append(raw_action.cpu().numpy())
-            logp_buf.append(logp.item())
-            rew_buf.append(float(reward))
-            val_buf.append(v.item())
-            done_buf.append(float(done))
-            if prototype >= 3:
-                day_import += info.get("costThisTick", 0.0)
-                day_export += info.get("profitThisTick", 0.0)
-            else:
-                day_import += info.get("costThisTick", 0.0)
-                day_export += info.get("profitThisTick", 0.0)
-            day_reward += float(reward)
-            obs = next_obs
+                obs_list.append(obs[i].copy())
+                act_list.append(raw_np[i].copy())
+                logp_list.append(float(logp_np[i]))
+                rew_list.append(float(reward))
+                val_list.append(float(val_np[i]))
+                done_list.append(float(done))
 
-            if done:
-                break
+                day_import[i] += info.get("costThisTick", 0.0)
+                day_export[i] += info.get("profitThisTick", 0.0)
+                day_reward[i] += float(reward)
+                obs[i] = next_obs
 
-        if prototype >= 3:
-            ep_costs.append(-info.get("totalProfitCents", 0.0))
-        else:
-            ep_costs.append(info.get("totalCost", 0.0))
-        ep_import.append(day_import)
-        ep_export.append(day_export)
-        ep_rewards.append(day_reward)
-        ep_unmet_base.append(info.get("totalUnmetBaseDemand", 0.0))
-        ep_unmet_def.append(info.get("totalUnmetDefDemand", 0.0))
-        ep_def_done.append(
-            sum(
-                1
-                for dd in env.dailyData["defDemandState"]
-                if dd.get("served", False)
-            )
-        )
+                if done:
+                    finished_episodes += 1
+                    if prototype >= 3:
+                        ep_costs.append(-info.get("totalProfitCents", 0.0))
+                    else:
+                        ep_costs.append(info.get("totalCost", 0.0))
+                    ep_import.append(float(day_import[i]))
+                    ep_export.append(float(day_export[i]))
+                    ep_rewards.append(float(day_reward[i]))
+                    ep_unmet_base.append(info.get("totalUnmetBaseDemand", 0.0))
+                    ep_unmet_def.append(info.get("totalUnmetDefDemand", 0.0))
+                    ep_def_done.append(
+                        sum(
+                            1
+                            for dd in env.dailyData["defDemandState"]
+                            if dd.get("served", False)
+                        )
+                    )
+                    day_import[i] = 0.0
+                    day_export[i] = 0.0
+                    day_reward[i] = 0.0
+                    obs[i], _ = env.reset()
 
     return {
-        "obs": torch.tensor(np.array(obs_buf), dtype=torch.float32, device=device),
-        "actions": torch.tensor(np.array(act_buf), dtype=torch.float32, device=device),
-        "logprobs": torch.tensor(np.array(logp_buf), dtype=torch.float32, device=device),
-        "rewards": torch.tensor(np.array(rew_buf), dtype=torch.float32, device=device),
-        "values": torch.tensor(np.array(val_buf), dtype=torch.float32, device=device),
-        "dones": torch.tensor(np.array(done_buf), dtype=torch.float32, device=device),
+        "obs": torch.tensor(np.array(obs_list), dtype=torch.float32, device=device),
+        "actions": torch.tensor(np.array(act_list), dtype=torch.float32, device=device),
+        "logprobs": torch.tensor(np.array(logp_list), dtype=torch.float32, device=device),
+        "rewards": torch.tensor(np.array(rew_list), dtype=torch.float32, device=device),
+        "values": torch.tensor(np.array(val_list), dtype=torch.float32, device=device),
+        "dones": torch.tensor(np.array(done_list), dtype=torch.float32, device=device),
         "ep_costs": ep_costs,
         "ep_import": ep_import,
         "ep_export": ep_export,
@@ -165,6 +209,8 @@ def collect_rollout(
         "ep_unmet_base": ep_unmet_base,
         "ep_unmet_def": ep_unmet_def,
         "ep_def_done": ep_def_done,
+        "steps": len(obs_list),
+        "ticks_per_day": ticks_per_day,
     }
 
 
@@ -234,7 +280,7 @@ def main():
     act_dim = act_dim_for_prototype(args.prototype)
     env_class, env_name = load_env_module(args.prototype)
     checkpoint_dir = RL_DIR / "checkpoints" / f"prototype_{args.prototype}"
-    log_file = RL_DIR / "logs" / "train_ppo.log"
+    log_file = RL_DIR / "logs" / f"train_ppo_prototype_{args.prototype}.log"
 
     torch.manual_seed(SEED)
     np.random.seed(SEED)
@@ -247,6 +293,10 @@ def main():
 
     log(f"device={DEVICE}", log_file)
     log(f"prototype={args.prototype} env={env_name}", log_file)
+    log(
+        f"updates={args.updates} episodes/rollout={args.episodes} num_envs={args.num_envs}",
+        log_file,
+    )
     if DEVICE.type == "cuda":
         log(f"gpu={torch.cuda.get_device_name(0)}", log_file)
 
@@ -259,11 +309,12 @@ def main():
         f"(80/20 seed={manifest['split_seed']})",
         log_file,
     )
-    if args.prototype >= 3:
+    if args.prototype >= 3:  # proto 3 and 4
         log(
             "metrics: profit_cents=totalProfitCents (higher=better) | "
             "import=grid spend cents | export=grid earnings cents | "
-            "reward=tick_profit_cents/100 + defer penalties | def_done=tasks completed/3",
+            "reward=tick_profit_cents/profitRewardScale + defer penalties | "
+            "def_done=tasks completed/3",
             log_file,
         )
     else:
@@ -277,20 +328,27 @@ def main():
     EnvClass = make_real_env(
         env_class, train_profiles, seed=SEED, prototype=args.prototype
     )
-    env = EnvClass()
+    envs = [EnvClass() for _ in range(max(1, args.num_envs))]
     policy = PolicyNet(OBS_DIM, act_dim).to(DEVICE)
     value_net = ValueNet(OBS_DIM).to(DEVICE)
+    if args.compile and hasattr(torch, "compile"):
+        policy = torch.compile(policy)
+        value_net = torch.compile(value_net)
+        log("torch.compile enabled", log_file)
+
     opt_policy = optim.Adam(policy.parameters(), lr=LR)
     opt_value = optim.Adam(value_net.parameters(), lr=LR)
 
     profit_history = deque(maxlen=ROLLING_WINDOW)
     unmet_history = deque(maxlen=ROLLING_WINDOW)
 
-    for update in range(1, TOTAL_UPDATES + 1):
-        batch = collect_rollout(
-            env, policy, value_net, EPISODES_PER_ROLLOUT, DEVICE, args.prototype
+    for update in range(1, args.updates + 1):
+        t0 = time.perf_counter()
+        batch = collect_rollout_batched(
+            envs, policy, value_net, args.episodes, DEVICE, args.prototype
         )
         _p_loss, _v_loss = ppo_update(policy, value_net, opt_policy, opt_value, batch)
+        rollout_s = time.perf_counter() - t0
 
         avg_cost = float(np.mean(batch["ep_costs"]))
         avg_profit = -avg_cost
@@ -308,11 +366,12 @@ def main():
         roll_unmet = float(np.mean(unmet_history))
 
         log(
-            f"update {update}/{TOTAL_UPDATES} | "
+            f"update {update}/{args.updates} | "
             f"profit={avg_profit:+.1f} roll_profit={roll_profit:+.1f} | "
             f"import={avg_import:.1f} export={avg_export:.1f} | "
             f"unmet={avg_unmet:.0f} roll_unmet={roll_unmet:.0f} | "
-            f"def_done={avg_def_done:.1f}/3 reward={avg_reward:.0f}",
+            f"def_done={avg_def_done:.1f}/3 reward={avg_reward:.0f} | "
+            f"rollout={rollout_s:.1f}s steps={batch['steps']}",
             log_file,
         )
 

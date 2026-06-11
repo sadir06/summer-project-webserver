@@ -1,9 +1,10 @@
-# Prototype 3 — Profit-Driven Arbitrage (ready for training)
+# Prototype 3 — Profit-Driven Arbitrage (**frozen — profitable on H100**)
 
-**Environment:** `RL Training/env4_prototype_3.py`  
-**Training data:** `data_collection/data/ticks.jsonl` only (not `live_inputs.py`)  
-**Checkpoint dir:** `RL Training/checkpoints/prototype_3/` (empty until training)  
-**Train command (when approved):** `cd "RL Training" && python train_ppo.py --prototype 3`
+**Environment:** `RL Training/env4_prototype_3.py` (frozen; do not edit)  
+**Checkpoint dir:** `RL Training/checkpoints/prototype_3/`  
+**Experiments:** use `env4_prototype_4.py` instead  
+
+H100 training (Jun 2026) crossed **positive profit ~update 174** and reached **~+1000 cents/day (~+$10)** by update 199. See `docs/prototype_4.md` for the full curve.
 
 ---
 

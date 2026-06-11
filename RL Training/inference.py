@@ -42,14 +42,18 @@ def parse_args():
         "--prototype",
         type=int,
         default=2,
-        choices=[1, 2, 3],
-        help="1=env4.py, 2=env4_prototype_2.py, 3=env4_prototype_3.py (default 2)",
+        choices=[1, 2, 3, 4],
+        help="1=env4, 2=proto2, 3=proto3, 4=proto4 (default 2)",
     )
     parser.add_argument("--seed", type=int, default=0, help="Day picker seed (eval mode only)")
     return parser.parse_args()
 
 
 def load_env_module(prototype: int):
+    if prototype == 4:
+        from env4_prototype_4 import SmartGridEnv
+
+        return SmartGridEnv
     if prototype == 3:
         from env4_prototype_3 import SmartGridEnv
 
