@@ -1,50 +1,62 @@
-import requests
-
-from hardware.config import (
-    ACTION_QUERY_PARAM,
-    ACTION_TIMEOUT_S,
-    ACTIONS_ENABLED,
-    PICO_ACTION_ENDPOINTS,
-    SC_ACTION_WATTS_SCALE,
-)
-
-
-def _scale_sc_action(sc_action: float) -> float:
-    return float(sc_action) * SC_ACTION_WATTS_SCALE
-
-
-def send_action(name: str, value: float) -> bool:
-    if not ACTIONS_ENABLED:
-        return False
-
-    endpoint = PICO_ACTION_ENDPOINTS[name]
-    url = f"{endpoint['base_url']}{endpoint['path']}"
-    try:
-        response = requests.get(
-            url,
-            params={ACTION_QUERY_PARAM: float(value)},
-            timeout=ACTION_TIMEOUT_S,
-        )
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        print(f"Error sending {name} action to {url}: {e}")
-        return False
-
-
-def send_actions(
-    grid_action: float,
-    sc_action: float,
-    demand_output: float,
-) -> dict[str, bool]:
-    if not ACTIONS_ENABLED:
-        print(
-            "actions skipped (ACTIONS_ENABLED=False; Pico firmware has no GET /action yet)"
-        )
-        return {"grid": False, "sc": False, "def": False}
-
-    return {
-        "grid": send_action("grid", grid_action),
-        "sc": send_action("sc", _scale_sc_action(sc_action)),
-        "def": send_action("def", demand_output),
-    }
+import requests
+
+from hardware.config import (
+    ACTION_QUERY_PARAM,
+    ACTION_TIMEOUT_S,
+    ACTIONS_ENABLED,
+    PICO_ACTION_ENDPOINTS,
+    SC_ACTION_WATTS_SCALE,
+)
+
+
+def _scale_sc_action(sc_action: float) -> float:
+    return float(sc_action) * SC_ACTION_WATTS_SCALE
+
+
+def send_action(name: str, value: float) -> bool:
+    if not ACTIONS_ENABLED:
+        return False
+
+    endpoint = PICO_ACTION_ENDPOINTS[name]
+    url = f"{endpoint['base_url']}{endpoint['path']}"
+    try:
+        response = requests.get(
+            url,
+            params={ACTION_QUERY_PARAM: float(value)},
+            timeout=ACTION_TIMEOUT_S,
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"Error sending {name} action to {url}: {e}")
+        return False
+
+
+def send_actions(
+    sc_action: float,
+    demand_output: float,
+    *,
+    grid_action: float | None = None,
+) -> dict[str, bool]:
+    """Send policy outputs to Picos.
+
+    Prototype 3: sc + def only (grid_action ignored).
+    Prototype 2: pass grid_action for surplus-export Pico when enabled.
+    """
+    if not ACTIONS_ENABLED:
+        print(
+            "actions skipped (ACTIONS_ENABLED=False; Pico firmware has no GET /action yet)"
+        )
+        results = {"sc": False, "def": False}
+        if grid_action is not None:
+            results["grid"] = False
+        return results
+
+    results = {
+        "sc": send_action("sc", _scale_sc_action(sc_action)),
+        "def": send_action("def", demand_output),
+    }
+    if grid_action is not None:
+        results["grid"] = send_action("grid", grid_action)
+    return results
+

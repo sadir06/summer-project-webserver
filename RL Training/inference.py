@@ -42,14 +42,18 @@ def parse_args():
         "--prototype",
         type=int,
         default=2,
-        choices=[1, 2],
-        help="1=env4.py, 2=env4_prototype_2.py (default)",
+        choices=[1, 2, 3],
+        help="1=env4.py, 2=env4_prototype_2.py, 3=env4_prototype_3.py (default 2)",
     )
     parser.add_argument("--seed", type=int, default=0, help="Day picker seed (eval mode only)")
     return parser.parse_args()
 
 
 def load_env_module(prototype: int):
+    if prototype == 3:
+        from env4_prototype_3 import SmartGridEnv
+
+        return SmartGridEnv
     if prototype == 2:
         from env4_prototype_2 import SmartGridEnv
 
@@ -59,16 +63,26 @@ def load_env_module(prototype: int):
     return SmartGridEnv
 
 
-def pick_day_profile(seed: int = 0):
-    train_profiles, test_profiles, manifest = load_day_data(PROJECT_ROOT)
+def act_dim_for_prototype(prototype: int) -> int:
+    return 2 if prototype >= 3 else 3
+
+
+def pick_day_profile(seed: int = 0, prototype: int = 2):
+    train_profiles, test_profiles, manifest = load_day_data(
+        PROJECT_ROOT, prototype=prototype
+    )
     rng = random.Random(seed)
     pool = test_profiles if test_profiles else train_profiles
     profile = rng.choice(pool)
     return profile, manifest
 
 
-def clip_action(raw_action: np.ndarray) -> np.ndarray:
+def clip_action(raw_action: np.ndarray, prototype: int) -> np.ndarray:
     action = raw_action.astype(np.float32).copy()
+    if prototype >= 3:
+        action[0] = np.clip(action[0], -1.0, 1.0)
+        action[1] = np.clip((action[1] + 1.0) / 2.0, 0.0, 1.0)
+        return action
     # Prototype 2: only negative grid_action exports PV surplus; +1 does nothing.
     action[0] = np.clip(action[0], -1.0, 0.0)
     action[1] = np.clip(action[1], -1.0, 1.0)
@@ -95,7 +109,7 @@ def resolve_checkpoint(prototype: int) -> Path:
 
 def load_policy(prototype: int, device: torch.device) -> PolicyNet:
     checkpoint_path = resolve_checkpoint(prototype)
-    policy = PolicyNet(obs_dim=14, act_dim=3).to(device)
+    policy = PolicyNet(obs_dim=14, act_dim=act_dim_for_prototype(prototype)).to(device)
     policy.load_state_dict(
         torch.load(checkpoint_path, map_location=device, weights_only=True)
     )
@@ -108,52 +122,61 @@ def sync_device(device: torch.device) -> None:
         torch.cuda.synchronize()
 
 
-def infer_tick(policy: PolicyNet, obs: np.ndarray, device: torch.device) -> np.ndarray:
-    action, _infer_ms = timed_infer_tick(policy, obs, device)
+def infer_tick(
+    policy: PolicyNet, obs: np.ndarray, device: torch.device, prototype: int
+) -> np.ndarray:
+    action, _infer_ms = timed_infer_tick(policy, obs, device, prototype)
     return action
 
 
 def timed_infer_tick(
-    policy: PolicyNet, obs: np.ndarray, device: torch.device
+    policy: PolicyNet, obs: np.ndarray, device: torch.device, prototype: int
 ) -> tuple[np.ndarray, float]:
     sync_device(device)
     t0 = time.perf_counter()
     with torch.no_grad():
         mu, _ = policy(torch.tensor(obs, dtype=torch.float32, device=device))
-        action = clip_action(mu.cpu().numpy())
+        action = clip_action(mu.cpu().numpy(), prototype)
     sync_device(device)
     return action, (time.perf_counter() - t0) * 1000.0
 
 
 def run_eval(args, env_class, device: torch.device) -> None:
-    profile, manifest = pick_day_profile(seed=args.seed)
+    profile, manifest = pick_day_profile(seed=args.seed, prototype=args.prototype)
 
     print(f"mode=eval prototype={args.prototype}")
     print(f"split: train={manifest['train_days']} test={manifest['test_days']}")
     print(f"day_id={profile.get('day_id', 'unknown')}")
     print(f"deferables={profile['deferables']}")
     if args.prototype >= 2:
-        print(f"tick0_pv_kw={profile['pvGen'][0]:.3f}")
+        print(f"tick0_pv_w={profile['pvGen'][0]:.3f}")
     else:
         print(f"tick0_irradiance={profile['irradiance'][0]:.3f}")
-    print(f"tick0_demand_kw={profile['baseDemand'][0]:.3f}")
-    print(f"tick0_buy_norm={profile['buyPrice'][0]:.3f}")
-    print(f"tick0_sell_norm={profile['sellPrice'][0]:.3f}")
+    print(f"tick0_demand_w={profile['baseDemand'][0]:.3f}")
+    if args.prototype >= 3:
+        print(f"tick0_buy_cents_J={profile['buyPrice'][0]:.3f}")
+        print(f"tick0_sell_cents_J={profile['sellPrice'][0]:.3f}")
+    else:
+        print(f"tick0_buy_norm={profile['buyPrice'][0]:.3f}")
+        print(f"tick0_sell_norm={profile['sellPrice'][0]:.3f}")
 
     env = env_class()
     reset_options = profile_to_reset_options(profile, args.prototype)
     reset_options["deferables"] = deepcopy(reset_options["deferables"])
     obs, _info = env.reset(seed=42, options=reset_options)
 
-    print(f"tick0_pv_kw={env.dailyData['pvGen'][0]:.3f}")
+    print(f"tick0_pv_w={env.dailyData['pvGen'][0]:.3f}")
     print(f"supercap_start={env.supercapEn:.3f}")
 
     policy, checkpoint_path = load_policy(args.prototype, device)
     print(f"checkpoint={checkpoint_path}")
 
-    action = infer_tick(policy, obs, device)
+    action = infer_tick(policy, obs, device, args.prototype)
     print("model_actions:")
-    if args.prototype >= 2:
+    if args.prototype >= 3:
+        print(f"  sc_action={action[0]:+.3f}")
+        print(f"  def_action={action[1]:+.3f}")
+    elif args.prototype >= 2:
         print(f"  surplus_export_action={action[0]:+.3f}")
         print(f"  sc_action={action[1]:+.3f}")
         print(f"  def_action={action[2]:+.3f}")
@@ -164,17 +187,25 @@ def run_eval(args, env_class, device: torch.device) -> None:
 
     _next_obs, reward, _terminated, _truncated, step_info = env.step(action)
     print(f"reward_after_tick={reward:.3f}")
-    print(f"total_cost_after_tick={step_info['totalCost']:.3f}")
-    if args.prototype >= 2:
+    if args.prototype >= 3:
+        print(f"tick_profit_cents={step_info.get('tickProfitCents', 0):.3f}")
+        print(f"total_profit_cents={step_info.get('totalProfitCents', 0):.3f}")
         print(f"grid_to_demand={step_info.get('gridToDemand', 0):.3f}")
         print(f"sc_to_demand={step_info.get('scToDemand', 0):.3f}")
-        print(f"arbitrage_import={step_info.get('arbitrageImportEn', 0):.3f}")
+        print(f"grid_to_sc={step_info.get('gridToSc', 0):.3f}")
+        print(f"sc_to_grid={step_info.get('scToGrid', 0):.3f}")
+    else:
+        print(f"total_cost_after_tick={step_info['totalCost']:.3f}")
+        if args.prototype >= 2:
+            print(f"grid_to_demand={step_info.get('gridToDemand', 0):.3f}")
+            print(f"sc_to_demand={step_info.get('scToDemand', 0):.3f}")
+            print(f"arbitrage_import={step_info.get('arbitrageImportEn', 0):.3f}")
     print(f"supercap_after_tick={env.supercapEn:.3f}")
 
 
 def run_live(args, env_class, device: torch.device) -> None:
     if args.prototype < 2:
-        raise SystemExit("Live mode requires --prototype 2 (hardware PV inputs).")
+        raise SystemExit("Live mode requires --prototype 2 or 3 (hardware PV inputs).")
 
     policy, checkpoint_path = load_policy(args.prototype, device)
     day_buffer = DaySeriesBuffer()
@@ -224,7 +255,7 @@ def run_live(args, env_class, device: torch.device) -> None:
 
         pvout_w = hardware.get("pvout")
         vcap_v = hardware.get("vcap")
-        pv_kw = (float(pvout_w) / 1000.0) if pvout_w is not None else 0.0
+        pv_w = float(pvout_w) if pvout_w is not None else 0.0
         supercap_en = (
             voltage_to_supercap_en(float(vcap_v), env_class)
             if vcap_v is not None
@@ -235,33 +266,42 @@ def run_live(args, env_class, device: torch.device) -> None:
         obs = build_observation(
             env_class=env_class,
             tick=int(tick),
-            demand_kw=demand,
+            demand_w=demand,
             buy_price_raw=buy_price,
             sell_price_raw=sell_price,
-            pv_kw=pv_kw,
+            pv_w=pv_w,
             supercap_en=supercap_en,
             defer_state=defer_state,
             day_buffer=day_buffer,
         )
-        action, infer_ms = timed_infer_tick(policy, obs, device)
+        action, infer_ms = timed_infer_tick(policy, obs, device, args.prototype)
         process_ms = (time.perf_counter() - process_start) * 1000.0
+
+        if args.prototype >= 3:
+            sc_action = action[0]
+            def_action = action[1]
+            grid_action = None
+        else:
+            grid_action = action[0]
+            sc_action = action[1]
+            def_action = action[2]
 
         demand_output = compute_pico_demand_power(
             instant_demand=demand,
             defer_state=defer_state,
-            def_action=action[2],
+            def_action=def_action,
             tick_dur_s=TICK_INTERVAL_S,
         )
 
         output_start = time.perf_counter()
-        results = send_actions(action[0], action[1], demand_output)
+        results = send_actions(sc_action, demand_output, grid_action=grid_action)
         output_ms = (time.perf_counter() - output_start) * 1000.0
 
         total_ms = input_ms + process_ms + output_ms
         budget_ms = TICK_INTERVAL_S * 1000.0
 
         print(
-            f"tick={tick} day={day} pv_kw={pv_kw:.3f} demand={demand:.3f} "
+            f"tick={tick} day={day} pv_w={pv_w:.3f} demand={demand:.3f} "
             f"sc_en={supercap_en:.3f}"
         )
         print(
@@ -271,11 +311,20 @@ def run_live(args, env_class, device: torch.device) -> None:
             f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
         )
         defer_en = total_deferrable_energy(defer_state)
-        print(
-            f"  actions: grid={action[0]:+.3f} sc={action[1]:+.3f} def_frac={action[2]:+.3f} "
-            f"demand_out={demand_output:.3f} (instant={demand:.3f} "
-            f"+ defer={defer_en * action[2] / TICK_INTERVAL_S:.3f}) sent={results}"
-        )
+        if args.prototype >= 3:
+            action_line = (
+                f"  actions: sc={sc_action:+.3f} def_frac={def_action:+.3f} "
+                f"demand_out={demand_output:.3f} (instant={demand:.3f} "
+                f"+ defer={defer_en * def_action / TICK_INTERVAL_S:.3f}) sent={results}"
+            )
+        else:
+            action_line = (
+                f"  actions: grid={grid_action:+.3f} sc={sc_action:+.3f} "
+                f"def_frac={def_action:+.3f} demand_out={demand_output:.3f} "
+                f"(instant={demand:.3f} + defer={defer_en * def_action / TICK_INTERVAL_S:.3f}) "
+                f"sent={results}"
+            )
+        print(action_line)
 
         last_tick = tick
         last_day = day

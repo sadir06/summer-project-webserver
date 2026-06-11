@@ -15,7 +15,6 @@ RL_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = RL_DIR.parent
 
 OBS_DIM = 14
-ACT_DIM = 3
 
 TOTAL_UPDATES = 500
 EPISODES_PER_ROLLOUT = 32
@@ -39,13 +38,21 @@ def parse_args():
         "--prototype",
         type=int,
         default=2,
-        choices=[1, 2],
-        help="1=env4.py, 2=env4_prototype_2.py (default)",
+        choices=[1, 2, 3],
+        help="1=env4.py, 2=env4_prototype_2.py, 3=env4_prototype_3.py (default 2)",
     )
     return parser.parse_args()
 
 
+def act_dim_for_prototype(prototype: int) -> int:
+    return 2 if prototype >= 3 else 3
+
+
 def load_env_module(prototype: int):
+    if prototype == 3:
+        from env4_prototype_3 import SmartGridEnv
+
+        return SmartGridEnv, "env4_prototype_3"
     if prototype == 2:
         from env4_prototype_2 import SmartGridEnv
 
@@ -62,15 +69,21 @@ def log(msg: str, log_file: Path) -> None:
         f.write(line + "\n")
 
 
-def clip_action(raw_action: np.ndarray) -> np.ndarray:
+def clip_action(raw_action: np.ndarray, prototype: int) -> np.ndarray:
     action = raw_action.astype(np.float32).copy()
+    if prototype >= 3:
+        action[0] = np.clip(action[0], -1.0, 1.0)
+        action[1] = np.clip((action[1] + 1.0) / 2.0, 0.0, 1.0)
+        return action
     action[0] = np.clip(action[0], -1.0, 1.0)
     action[1] = np.clip(action[1], -1.0, 1.0)
     action[2] = np.clip((action[2] + 1.0) / 2.0, 0.0, 1.0)
     return action
 
 
-def collect_rollout(env, policy, value_net, episodes: int, device: torch.device):
+def collect_rollout(
+    env, policy, value_net, episodes: int, device: torch.device, prototype: int
+):
     obs_buf, act_buf, logp_buf, rew_buf, val_buf, done_buf = [], [], [], [], [], []
     ep_costs = []
     ep_import = []
@@ -99,7 +112,7 @@ def collect_rollout(env, policy, value_net, episodes: int, device: torch.device)
                 logp = dist.log_prob(raw_action).sum()
                 v = value_net(obs_t)
 
-            action = clip_action(raw_action.cpu().numpy())
+            action = clip_action(raw_action.cpu().numpy(), prototype)
             next_obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
@@ -109,15 +122,22 @@ def collect_rollout(env, policy, value_net, episodes: int, device: torch.device)
             rew_buf.append(float(reward))
             val_buf.append(v.item())
             done_buf.append(float(done))
-            day_import += info.get("costThisTick", 0.0)
-            day_export += info.get("profitThisTick", 0.0)
+            if prototype >= 3:
+                day_import += info.get("costThisTick", 0.0)
+                day_export += info.get("profitThisTick", 0.0)
+            else:
+                day_import += info.get("costThisTick", 0.0)
+                day_export += info.get("profitThisTick", 0.0)
             day_reward += float(reward)
             obs = next_obs
 
             if done:
                 break
 
-        ep_costs.append(info.get("totalCost", 0.0))
+        if prototype >= 3:
+            ep_costs.append(-info.get("totalProfitCents", 0.0))
+        else:
+            ep_costs.append(info.get("totalCost", 0.0))
         ep_import.append(day_import)
         ep_export.append(day_export)
         ep_rewards.append(day_reward)
@@ -211,6 +231,7 @@ def ppo_update(policy, value_net, opt_policy, opt_value, batch):
 
 def main():
     args = parse_args()
+    act_dim = act_dim_for_prototype(args.prototype)
     env_class, env_name = load_env_module(args.prototype)
     checkpoint_dir = RL_DIR / "checkpoints" / f"prototype_{args.prototype}"
     log_file = RL_DIR / "logs" / "train_ppo.log"
@@ -229,25 +250,35 @@ def main():
     if DEVICE.type == "cuda":
         log(f"gpu={torch.cuda.get_device_name(0)}", log_file)
 
-    train_profiles, _test_profiles, manifest = load_day_data(PROJECT_ROOT)
+    train_profiles, _test_profiles, manifest = load_day_data(
+        PROJECT_ROOT, prototype=args.prototype
+    )
     log(
         f"data: {manifest['total_complete_days']} complete days | "
         f"train={manifest['train_days']} test={manifest['test_days']} "
         f"(80/20 seed={manifest['split_seed']})",
         log_file,
     )
-    log(
-        "metrics: net_profit=-totalCost (higher=better) | "
-        "import=grid spend | export=grid earnings | "
-        "unmet=Joules not served (lower=better) | def_done=tasks completed/3",
-        log_file,
-    )
+    if args.prototype >= 3:
+        log(
+            "metrics: profit_cents=totalProfitCents (higher=better) | "
+            "import=grid spend cents | export=grid earnings cents | "
+            "reward=tick_profit_cents/100 + defer penalties | def_done=tasks completed/3",
+            log_file,
+        )
+    else:
+        log(
+            "metrics: net_profit=-totalCost (higher=better) | "
+            "import=grid spend | export=grid earnings | "
+            "unmet=Joules not served (lower=better) | def_done=tasks completed/3",
+            log_file,
+        )
 
     EnvClass = make_real_env(
         env_class, train_profiles, seed=SEED, prototype=args.prototype
     )
     env = EnvClass()
-    policy = PolicyNet(OBS_DIM, ACT_DIM).to(DEVICE)
+    policy = PolicyNet(OBS_DIM, act_dim).to(DEVICE)
     value_net = ValueNet(OBS_DIM).to(DEVICE)
     opt_policy = optim.Adam(policy.parameters(), lr=LR)
     opt_value = optim.Adam(value_net.parameters(), lr=LR)
@@ -256,7 +287,9 @@ def main():
     unmet_history = deque(maxlen=ROLLING_WINDOW)
 
     for update in range(1, TOTAL_UPDATES + 1):
-        batch = collect_rollout(env, policy, value_net, EPISODES_PER_ROLLOUT, DEVICE)
+        batch = collect_rollout(
+            env, policy, value_net, EPISODES_PER_ROLLOUT, DEVICE, args.prototype
+        )
         _p_loss, _v_loss = ppo_update(policy, value_net, opt_policy, opt_value, batch)
 
         avg_cost = float(np.mean(batch["ep_costs"]))

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from env4 import SmartGridEnv
 from env4_prototype_2 import SmartGridEnv as SmartGridEnvProto2
+from env4_prototype_3 import SmartGridEnv as SmartGridEnvProto3
 
 TICKS_PER_DAY = SmartGridEnv.ticksPerDay
 MAX_PRICE = 150.0
@@ -78,21 +79,28 @@ def sample_day_pv_gen(day_id: int) -> list[float]:
     return [SmartGridEnvProto2.samplePvPower(rng) for _ in range(TICKS_PER_DAY)]
 
 
-def rows_to_day_profile(day_rows: list[dict]) -> dict:
+def rows_to_day_profile(day_rows: list[dict], prototype: int = 2) -> dict:
     by_tick = {r["tick"]: r for r in day_rows}
     day_id = day_rows[0]["day"]
 
     irradiance = []
+    pv_gen = []
     base_demand = []
     buy_price = []
     sell_price = []
 
     for t in range(TICKS_PER_DAY):
         row = by_tick[t]
-        irradiance.append(SmartGridEnv.normalizeIrradiance(row.get("sun") or 0.0))
+        sun = row.get("sun") or 0.0
+        irradiance.append(SmartGridEnv.normalizeIrradiance(sun))
         base_demand.append(row.get("demand") or 0.0)
-        buy_price.append((row.get("buy_price") or 0.0) / MAX_PRICE)
-        sell_price.append((row.get("sell_price") or 0.0) / MAX_PRICE)
+        if prototype >= 3:
+            pv_gen.append(SmartGridEnvProto3.sun_to_pv_w(sun))
+            buy_price.append(float(row.get("buy_price") or 0.0))
+            sell_price.append(float(row.get("sell_price") or 0.0))
+        else:
+            buy_price.append((row.get("buy_price") or 0.0) / MAX_PRICE)
+            sell_price.append((row.get("sell_price") or 0.0) / MAX_PRICE)
 
     defer_src = by_tick[0].get("deferables") or []
     deferables = [
@@ -104,15 +112,19 @@ def rows_to_day_profile(day_rows: list[dict]) -> dict:
         for d in defer_src
     ]
 
-    return {
+    profile = {
         "day_id": day_id,
         "irradiance": irradiance,
-        "pvGen": sample_day_pv_gen(day_id),
         "baseDemand": base_demand,
         "buyPrice": buy_price,
         "sellPrice": sell_price,
         "deferables": deferables,
     }
+    if prototype >= 3:
+        profile["pvGen"] = pv_gen
+    else:
+        profile["pvGen"] = sample_day_pv_gen(day_id)
+    return profile
 
 
 def profile_to_reset_options(profile: dict, prototype: int) -> dict:
@@ -129,15 +141,19 @@ def profile_to_reset_options(profile: dict, prototype: int) -> dict:
     return options
 
 
-def _profiles_for_ids(complete_days: dict[int, list[dict]], day_ids: list[int]) -> list[dict]:
+def _profiles_for_ids(
+    complete_days: dict[int, list[dict]], day_ids: list[int], prototype: int = 2
+) -> list[dict]:
     profiles = []
     for day_id in day_ids:
         if day_id in complete_days:
-            profiles.append(rows_to_day_profile(complete_days[day_id]))
+            profiles.append(rows_to_day_profile(complete_days[day_id], prototype=prototype))
     return profiles
 
 
-def load_day_data(project_root: Path) -> tuple[list[dict], list[dict], dict]:
+def load_day_data(
+    project_root: Path, prototype: int = 2
+) -> tuple[list[dict], list[dict], dict]:
     data_dir = project_root / "data_collection" / "data"
     ticks_path = data_dir / "ticks.jsonl"
 
@@ -145,8 +161,12 @@ def load_day_data(project_root: Path) -> tuple[list[dict], list[dict], dict]:
     complete_days = group_complete_days(rows)
     manifest = load_split_manifest(project_root, complete_days)
 
-    train_profiles = _profiles_for_ids(complete_days, manifest["train_day_ids"])
-    test_profiles = _profiles_for_ids(complete_days, manifest["test_day_ids"])
+    train_profiles = _profiles_for_ids(
+        complete_days, manifest["train_day_ids"], prototype=prototype
+    )
+    test_profiles = _profiles_for_ids(
+        complete_days, manifest["test_day_ids"], prototype=prototype
+    )
 
     if not train_profiles:
         raise RuntimeError("No complete train days found in ticks.jsonl")
