@@ -14,8 +14,8 @@ PICO_ENDPOINTS = {
 
 # Output Picos (policy actions) — grid/def IPs are placeholders until known.
 # Supercap action goes to the same capacitor Pico that reports /p and /va.
-PICO_URL_GRID_ACTION = "http://172.20.10.5"  # PLACEHOLDER
-PICO_URL_DEF_ACTION = "http://172.20.10.7"  # PLACEHOLDER
+PICO_URL_GRID_ACTION = "http://172.20.10.5"  
+PICO_URL_DEF_ACTION = "http://172.20.10.7"  
 
 PICO_ACTION_ENDPOINTS = {
     "grid": {"base_url": PICO_URL_GRID_ACTION, "path": "/action"},

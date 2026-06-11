@@ -100,10 +100,26 @@ def load_policy(prototype: int, device: torch.device) -> PolicyNet:
     return policy, checkpoint_path
 
 
+def sync_device(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+
 def infer_tick(policy: PolicyNet, obs: np.ndarray, device: torch.device) -> np.ndarray:
+    action, _infer_ms = timed_infer_tick(policy, obs, device)
+    return action
+
+
+def timed_infer_tick(
+    policy: PolicyNet, obs: np.ndarray, device: torch.device
+) -> tuple[np.ndarray, float]:
+    sync_device(device)
+    t0 = time.perf_counter()
     with torch.no_grad():
         mu, _ = policy(torch.tensor(obs, dtype=torch.float32, device=device))
-    return clip_action(mu.cpu().numpy())
+        action = clip_action(mu.cpu().numpy())
+    sync_device(device)
+    return action, (time.perf_counter() - t0) * 1000.0
 
 
 def run_eval(args, env_class, device: torch.device) -> None:
@@ -164,14 +180,17 @@ def run_live(args, env_class, device: torch.device) -> None:
 
     print(f"mode=live prototype={args.prototype}")
     print(f"checkpoint={checkpoint_path}")
+    print(f"device={device}")
     print(f"tick_interval={TICK_INTERVAL_S}s")
     print("waiting for cloud + hardware inputs...")
 
     while True:
-        loop_start = time.monotonic()
+        loop_start = time.perf_counter()
         try:
+            input_start = time.perf_counter()
             cloud = fetch_cloud_snapshot()
             hardware = read_hardware()
+            input_ms = (time.perf_counter() - input_start) * 1000.0
         except Exception as e:
             print(f"poll error: {e}")
             time.sleep(1)
@@ -186,7 +205,7 @@ def run_live(args, env_class, device: torch.device) -> None:
         day_buffer.reset_if_new_day(day)
 
         if tick == last_tick and day == last_day:
-            elapsed = time.monotonic() - loop_start
+            elapsed = time.perf_counter() - loop_start
             time.sleep(max(0.2, 1.0 - elapsed))
             continue
 
@@ -204,6 +223,7 @@ def run_live(args, env_class, device: torch.device) -> None:
             else 0.0
         )
 
+        process_start = time.perf_counter()
         obs = build_observation(
             env_class=env_class,
             tick=int(tick),
@@ -215,16 +235,25 @@ def run_live(args, env_class, device: torch.device) -> None:
             defer_state=defer_state,
             day_buffer=day_buffer,
         )
+        action, infer_ms = timed_infer_tick(policy, obs, device)
+        process_ms = (time.perf_counter() - process_start) * 1000.0
 
-        infer_start = time.monotonic()
-        action = infer_tick(policy, obs, device)
-        infer_ms = (time.monotonic() - infer_start) * 1000.0
-
+        output_start = time.perf_counter()
         results = send_actions(action[0], action[1], action[2])
+        output_ms = (time.perf_counter() - output_start) * 1000.0
+
+        total_ms = input_ms + process_ms + output_ms
+        budget_ms = TICK_INTERVAL_S * 1000.0
 
         print(
             f"tick={tick} day={day} pv_kw={pv_kw:.3f} demand={demand:.3f} "
-            f"sc_en={supercap_en:.3f} infer_ms={infer_ms:.1f}"
+            f"sc_en={supercap_en:.3f}"
+        )
+        print(
+            f"  bench: input={input_ms:.1f}ms "
+            f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
+            f"output={output_ms:.1f}ms total={total_ms:.1f}ms "
+            f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
         )
         print(
             f"  actions: grid={action[0]:+.3f} sc={action[1]:+.3f} def={action[2]:+.3f} "
@@ -234,7 +263,7 @@ def run_live(args, env_class, device: torch.device) -> None:
         last_tick = tick
         last_day = day
 
-        elapsed = time.monotonic() - loop_start
+        elapsed = time.perf_counter() - loop_start
         sleep_s = max(0.0, TICK_INTERVAL_S - elapsed)
         if sleep_s > 0:
             time.sleep(sleep_s)
