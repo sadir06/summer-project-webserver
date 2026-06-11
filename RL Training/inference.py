@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from hardware.actions import send_actions  # noqa: E402
-from hardware.cloud import fetch_cloud_snapshot  # noqa: E402
+from hardware.cloud import fetch_cloud_snapshot, publish_load_demand  # noqa: E402
 from hardware.config import FLASK_PORT, LAPTOP_IP, TICK_INTERVAL_S  # noqa: E402
 from hardware.poller import read_hardware  # noqa: E402
 
@@ -292,7 +292,13 @@ def run_live(args, env_class, device: torch.device) -> None:
         )
 
         output_start = time.perf_counter()
-        results = send_actions(sc_action, demand_output, grid_action=grid_action)
+        results = send_actions(sc_action, grid_action=grid_action)
+        load_sent = publish_load_demand(
+            day=int(day),
+            tick=int(tick),
+            total_demand_w=demand_output,
+        )
+        results["load"] = load_sent
         output_ms = (time.perf_counter() - output_start) * 1000.0
 
         total_ms = input_ms + process_ms + output_ms

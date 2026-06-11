@@ -102,7 +102,13 @@ Set `ACTIONS_ENABLED = True` in `hardware/config.py` once this handler exists.
 
 **Cap Pico (`sc`):** `value` = `sc_action × 3` (watts).
 
-**Load Pico (`def`):** `value` = total demand power to serve:
+**Load Pico:** polls Azure `GET /demand` (does not use direct `/action`). `inference.py` publishes:
+
+```json
+{"day": 5937300, "tick": 45, "total_demand": 1.164}
+```
+
+`total_demand` (watts) = instant demand + deferrable power this tick:
 
 ```
 instant_demand + (total_deferrable_energy_J × def_action / 5)

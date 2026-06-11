@@ -1,5 +1,5 @@
 from hardware.actions import send_action, send_actions
-from hardware.cloud import fetch_cloud_snapshot
+from hardware.cloud import fetch_cloud_snapshot, publish_load_demand
 from hardware.config import (
     FLASK_PORT,
     LAPTOP_IP,
@@ -20,6 +20,7 @@ __all__ = [
     "PICO_URL_CP",
     "PICO_URL_PV",
     "fetch_cloud_snapshot",
+    "publish_load_demand",
     "poll_hardware",
     "read_hardware",
     "send_action",
