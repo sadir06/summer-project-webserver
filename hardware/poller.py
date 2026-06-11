@@ -13,10 +13,17 @@ def _poll_endpoint(field: str, base_url: str, path: str) -> float | None:
         return None
 
 
-def poll_hardware(cache: dict, lock) -> None:
+def read_hardware() -> dict[str, float | None]:
+    readings: dict[str, float | None] = {}
     for field, endpoint in PICO_ENDPOINTS.items():
-        value = _poll_endpoint(field, endpoint["base_url"], endpoint["path"])
-        with lock:
+        readings[field] = _poll_endpoint(field, endpoint["base_url"], endpoint["path"])
+    return readings
+
+
+def poll_hardware(cache: dict, lock) -> None:
+    readings = read_hardware()
+    with lock:
+        for field, value in readings.items():
             if value is not None:
                 cache[field] = value
             elif field not in cache:
