@@ -7,9 +7,9 @@ import random
 class SmartGridEnv(gym.Env):
     """Prototype 3 (frozen): profit-driven arbitrage — H100 run reached +profit ~update 174.
 
-  DO NOT change physics/reward knobs here; use env4_prototype_4.py for experiments.
+  DO NOT change physics/reward knobs here; fork a new env module for experiments.
   Training data from ticks.jsonl. Two actions: scAction, defAction. Auto PSU.
-  Tuned knobs: profitRewardScale=50, deferMissPenalty=5, defDemandATicks=15, maxDefPower=8.
+  Tuned knobs: profitRewardScale=50, deferMissPenalty=5, defDemandATicks=30, maxDefPower=8.
   """
 
     # Supercapacitor physical model (hardware-aligned)
@@ -29,7 +29,7 @@ class SmartGridEnv(gym.Env):
     tickDur = 5
     ticksPerDay = 60
 
-    defDemandATicks = 15
+    defDemandATicks = 30
 
     # Raw price ranges from ticks.jsonl (cents/J); obs normalisation only
     maxBuyPriceObs = 95.0
@@ -48,8 +48,8 @@ class SmartGridEnv(gym.Env):
     gridSellPowerMax = 8.0
 
     # Reward scaling: profit is in cents; divide so PPO gradients stay stable
-    profitRewardScale = 50.0
-    deferMissPenaltyPerJ_cents = 5.0
+    profitRewardScale = 100.0
+    deferMissPenaltyPerJ_cents = 10
 
     @classmethod
     def sun_to_pv_w(cls, sun: float) -> float:

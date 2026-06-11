@@ -39,8 +39,8 @@ def parse_args():
         "--prototype",
         type=int,
         default=2,
-        choices=[1, 2, 3, 4],
-        help="1=env4, 2=proto2, 3=proto3 (frozen), 4=proto4 (default 2)",
+        choices=[1, 2, 3],
+        help="1=env4, 2=proto2, 3=proto3 (frozen, default 2)",
     )
     parser.add_argument("--updates", type=int, default=TOTAL_UPDATES)
     parser.add_argument("--episodes", type=int, default=EPISODES_PER_ROLLOUT)
@@ -63,10 +63,6 @@ def act_dim_for_prototype(prototype: int) -> int:
 
 
 def load_env_module(prototype: int):
-    if prototype == 4:
-        from env4_prototype_4 import SmartGridEnv
-
-        return SmartGridEnv, "env4_prototype_4"
     if prototype == 3:
         from env4_prototype_3 import SmartGridEnv
 
@@ -309,7 +305,7 @@ def main():
         f"(80/20 seed={manifest['split_seed']})",
         log_file,
     )
-    if args.prototype >= 3:  # proto 3 and 4
+    if args.prototype >= 3:
         log(
             "metrics: profit_cents=totalProfitCents (higher=better) | "
             "import=grid spend cents | export=grid earnings cents | "
@@ -378,11 +374,11 @@ def main():
         if update % 25 == 0:
             torch.save(policy.state_dict(), checkpoint_dir / "policy_latest.pth")
             torch.save(value_net.state_dict(), checkpoint_dir / "value_latest.pth")
-            log("saved checkpoints", log_file)
+            log(f"saved checkpoints -> {checkpoint_dir}", log_file)
 
     torch.save(policy.state_dict(), checkpoint_dir / "policy_final.pth")
     torch.save(value_net.state_dict(), checkpoint_dir / "value_final.pth")
-    log("training complete", log_file)
+    log(f"training complete -> {checkpoint_dir / 'policy_final.pth'}", log_file)
 
 
 if __name__ == "__main__":

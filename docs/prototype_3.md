@@ -2,9 +2,8 @@
 
 **Environment:** `RL Training/env4_prototype_3.py` (frozen; do not edit)  
 **Checkpoint dir:** `RL Training/checkpoints/prototype_3/`  
-**Experiments:** use `env4_prototype_4.py` instead  
 
-H100 training (Jun 2026) crossed **positive profit ~update 174** and reached **~+1000 cents/day (~+$10)** by update 199. See `docs/prototype_4.md` for the full curve.
+H100 training (Jun 2026) crossed **positive profit ~update 174**, reached **~+1000 cents/day (~+$10)** by update 199, and plateaued around **~+1680 cents/day (~+$17)** with `def_done=3.0/3`.
 
 ---
 
