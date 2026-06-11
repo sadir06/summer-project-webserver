@@ -37,12 +37,12 @@ ACTIONS_ENABLED = False
 ACTION_QUERY_PARAM = "value"
 
 PICO_URL_GRID_ACTION = "http://172.20.10.6"  # PLACEHOLDER
-PICO_URL_DEF_ACTION = "http://172.20.10.7"  # PLACEHOLDER
+PICO_URL_DEF_ACTION = "http://172.20.10.7"  # Load Pico — update after boot
+LOAD_DEMAND_PATH = "/demand"  # POST JSON {day, tick, total_demand}
 
 PICO_ACTION_ENDPOINTS = {
     "grid": {"base_url": PICO_URL_GRID_ACTION, "path": "/action"},
     "sc": {"base_url": PICO_URL_CP, "path": "/action"},
-    "def": {"base_url": PICO_URL_DEF_ACTION, "path": "/action"},
 }
 
 # Model sc_action is [-1, 1]; capwifi pout_ref is watts in roughly [-3, 3].

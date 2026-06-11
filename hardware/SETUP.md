@@ -102,7 +102,10 @@ Set `ACTIONS_ENABLED = True` in `hardware/config.py` once this handler exists.
 
 **Cap Pico (`sc`):** `value` = `sc_action × 3` (watts).
 
-**Load Pico:** polls Azure `GET /demand` (does not use direct `/action`). `inference.py` publishes:
+**Load Pico:** each tick `inference.py` sends model-computed load to the Load Pico (not Azure):
+
+1. **POST** `http://<LOAD_PICO_IP>/demand` with JSON body, and
+2. **Mirror** on Flask `GET http://172.20.10.4:8000/api/load_demand` (for Pico polling, same pattern as sun).
 
 ```json
 {"day": 5937300, "tick": 45, "total_demand": 1.164}
@@ -114,7 +117,7 @@ Set `ACTIONS_ENABLED = True` in `hardware/config.py` once this handler exists.
 instant_demand + (total_deferrable_energy_J × def_action / 5)
 ```
 
-`def_action` is the model fraction in `[0, 1]`; `/5` converts energy-per-tick to power (W).
+Set `PICO_URL_DEF_ACTION` in `hardware/config.py` to the Load Pico IP.
 
 ## Quick connectivity tests (from laptop)
 

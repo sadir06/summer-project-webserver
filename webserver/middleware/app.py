@@ -4,6 +4,7 @@ import threading
 from flask import Flask, jsonify, render_template
 
 from hardware.config import FLASK_HOST, FLASK_PORT, LAPTOP_IP
+from hardware.load_demand import get_model_load_demand
 from webserver.middleware.poller import poll_loop
 from webserver.middleware.state import cache, lock
 
@@ -20,6 +21,12 @@ app = Flask(
 def get_state():
     with lock:
         return jsonify(cache)
+
+
+@app.route("/api/load_demand")
+def get_load_demand():
+    """Load Pico polls this for model total_demand (instant + defer), each tick."""
+    return jsonify(get_model_load_demand())
 
 
 @app.route("/api/sun_data")
@@ -49,4 +56,5 @@ if __name__ == "__main__":
     threading.Thread(target=poll_loop, daemon=True).start()
     print(f"Flask listening on {FLASK_HOST}:{FLASK_PORT}")
     print(f"MPPT Pico should poll: http://{LAPTOP_IP}:{FLASK_PORT}/api/sun_data")
+    print(f"Load Pico should poll: http://{LAPTOP_IP}:{FLASK_PORT}/api/load_demand")
     app.run(host=FLASK_HOST, port=FLASK_PORT)
