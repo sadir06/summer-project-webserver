@@ -3,6 +3,7 @@ import threading
 
 from flask import Flask, jsonify, render_template
 
+from hardware.config import FLASK_HOST, FLASK_PORT, LAPTOP_IP
 from webserver.middleware.poller import poll_loop
 from webserver.middleware.state import cache, lock
 
@@ -46,4 +47,6 @@ def index():
 
 if __name__ == "__main__":
     threading.Thread(target=poll_loop, daemon=True).start()
-    app.run(host="0.0.0.0", port=8000)
+    print(f"Flask listening on {FLASK_HOST}:{FLASK_PORT}")
+    print(f"MPPT Pico should poll: http://{LAPTOP_IP}:{FLASK_PORT}/api/sun_data")
+    app.run(host=FLASK_HOST, port=FLASK_PORT)

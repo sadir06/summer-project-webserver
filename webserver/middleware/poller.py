@@ -6,10 +6,9 @@ from datetime import datetime, timezone
 
 import requests
 
+from hardware.config import CLOUD_BASE_URL
 from hardware.poller import poll_hardware
 from webserver.middleware.state import cache, lock
-
-BASE_URL = "https://icelec50015.azurewebsites.net"
 
 cloud_counter = 0
 
@@ -20,11 +19,11 @@ def poll_loop():
     while True:
         if cloud_counter == 0:
             try:
-                response_sun = requests.get(f"{BASE_URL}/sun", timeout=5)
-                response_price = requests.get(f"{BASE_URL}/price", timeout=5)
-                response_demand = requests.get(f"{BASE_URL}/demand", timeout=5)
-                response_deferables = requests.get(f"{BASE_URL}/deferables", timeout=5)
-                response_yesterday = requests.get(f"{BASE_URL}/yesterday", timeout=5)
+                response_sun = requests.get(f"{CLOUD_BASE_URL}/sun", timeout=5)
+                response_price = requests.get(f"{CLOUD_BASE_URL}/price", timeout=5)
+                response_demand = requests.get(f"{CLOUD_BASE_URL}/demand", timeout=5)
+                response_deferables = requests.get(f"{CLOUD_BASE_URL}/deferables", timeout=5)
+                response_yesterday = requests.get(f"{CLOUD_BASE_URL}/yesterday", timeout=5)
 
                 response_sun.raise_for_status()
                 response_price.raise_for_status()

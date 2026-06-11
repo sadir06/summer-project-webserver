@@ -159,3 +159,22 @@ def build_observation(
         dtype=np.float32,
     )
     return np.clip(obs, env_class().observation_space.low, env_class().observation_space.high)
+
+
+def total_deferrable_energy(defer_state: list[dict]) -> float:
+    return float(sum(dd["remainingEn"] for dd in defer_state))
+
+
+def compute_pico_demand_power(
+    instant_demand: float,
+    defer_state: list[dict],
+    def_action: float,
+    tick_dur_s: float,
+) -> float:
+    """Load Pico power = instant demand + deferrable power this tick.
+
+    deferrable energy (J) * model fraction / tick duration (s) -> watts this tick.
+    """
+    defer_power = total_deferrable_energy(defer_state) * float(def_action) / tick_dur_s
+    total_demand = float(instant_demand) + defer_power
+    return 

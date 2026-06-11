@@ -12,7 +12,9 @@ from load_days import load_day_data, profile_to_reset_options
 from live_inputs import (
     DaySeriesBuffer,
     build_observation,
+    compute_pico_demand_power,
     parse_deferables,
+    total_deferrable_energy,
     voltage_to_supercap_en,
 )
 from networks import PolicyNet
@@ -24,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from hardware.actions import send_actions  # noqa: E402
 from hardware.cloud import fetch_cloud_snapshot  # noqa: E402
-from hardware.config import TICK_INTERVAL_S  # noqa: E402
+from hardware.config import FLASK_PORT, LAPTOP_IP, TICK_INTERVAL_S  # noqa: E402
 from hardware.poller import read_hardware  # noqa: E402
 
 
@@ -67,7 +69,8 @@ def pick_day_profile(seed: int = 0):
 
 def clip_action(raw_action: np.ndarray) -> np.ndarray:
     action = raw_action.astype(np.float32).copy()
-    action[0] = np.clip(action[0], -1.0, 1.0)
+    # Prototype 2: only negative grid_action exports PV surplus; +1 does nothing.
+    action[0] = np.clip(action[0], -1.0, 0.0)
     action[1] = np.clip(action[1], -1.0, 1.0)
     action[2] = np.clip((action[2] + 1.0) / 2.0, 0.0, 1.0)
     return action
@@ -182,6 +185,11 @@ def run_live(args, env_class, device: torch.device) -> None:
     print(f"checkpoint={checkpoint_path}")
     print(f"device={device}")
     print(f"tick_interval={TICK_INTERVAL_S}s")
+    print(
+        f"MPPT Pico needs Flask running: "
+        f"http://{LAPTOP_IP}:{FLASK_PORT}/api/sun_data "
+        f"(set laptop Wi-Fi IP to {LAPTOP_IP} on the hotspot)"
+    )
     print("waiting for cloud + hardware inputs...")
 
     while True:
@@ -238,8 +246,15 @@ def run_live(args, env_class, device: torch.device) -> None:
         action, infer_ms = timed_infer_tick(policy, obs, device)
         process_ms = (time.perf_counter() - process_start) * 1000.0
 
+        demand_output = compute_pico_demand_power(
+            instant_demand=demand,
+            defer_state=defer_state,
+            def_action=action[2],
+            tick_dur_s=TICK_INTERVAL_S,
+        )
+
         output_start = time.perf_counter()
-        results = send_actions(action[0], action[1], action[2])
+        results = send_actions(action[0], action[1], demand_output)
         output_ms = (time.perf_counter() - output_start) * 1000.0
 
         total_ms = input_ms + process_ms + output_ms
@@ -255,9 +270,11 @@ def run_live(args, env_class, device: torch.device) -> None:
             f"output={output_ms:.1f}ms total={total_ms:.1f}ms "
             f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
         )
+        defer_en = total_deferrable_energy(defer_state)
         print(
-            f"  actions: grid={action[0]:+.3f} sc={action[1]:+.3f} def={action[2]:+.3f} "
-            f"sent={results}"
+            f"  actions: grid={action[0]:+.3f} sc={action[1]:+.3f} def_frac={action[2]:+.3f} "
+            f"demand_out={demand_output:.3f} (instant={demand:.3f} "
+            f"+ defer={defer_en * action[2] / TICK_INTERVAL_S:.3f}) sent={results}"
         )
 
         last_tick = tick
