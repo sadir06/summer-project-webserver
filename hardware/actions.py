@@ -16,17 +16,18 @@ def _scale_sc_action(sc_action: float) -> float:
     return float(sc_action) * SC_ACTION_WATTS_SCALE
 
 
-def send_action(name: str, value: float) -> bool:
+def send_action(name: str, value: float, *, timeout_s: float | None = None) -> bool:
     if not ACTIONS_ENABLED:
         return False
 
     endpoint = PICO_ACTION_ENDPOINTS[name]
     url = f"{endpoint['base_url']}{endpoint['path']}"
+    timeout = ACTION_TIMEOUT_S if timeout_s is None else timeout_s
     try:
         response = requests.get(
             url,
             params={ACTION_QUERY_PARAM: float(value)},
-            timeout=ACTION_TIMEOUT_S,
+            timeout=timeout,
         )
         response.raise_for_status()
         return True
@@ -62,6 +63,7 @@ def send_actions(
     sc_action: float,
     *,
     grid_action: float | None = None,
+    timeout_s: float | None = None,
 ) -> dict[str, bool]:
     """Send supercap (and optional grid) actions directly to Picos."""
     if not ACTIONS_ENABLED:
@@ -73,9 +75,10 @@ def send_actions(
             results["grid"] = False
         return results
 
+    action_timeout = ACTION_TIMEOUT_S if timeout_s is None else timeout_s
     results = {
-        "sc": send_action("sc", _scale_sc_action(sc_action)),
+        "sc": send_action("sc", _scale_sc_action(sc_action), timeout_s=action_timeout),
     }
     if grid_action is not None:
-        results["grid"] = send_action("grid", grid_action)
+        results["grid"] = send_action("grid", grid_action, timeout_s=action_timeout)
     return results

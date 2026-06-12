@@ -10,6 +10,7 @@ from hardware.config import FLASK_HOST, FLASK_PORT, LAPTOP_IP
 from hardware.inference_recorder import (
     finalize_run,
     get_recording_state,
+    record_inference_tick,
     start_new_run,
 )
 from hardware.inference_telemetry import append_inference_tick, get_inference_telemetry
@@ -46,11 +47,11 @@ def get_inference_run():
     return jsonify(get_recording_state())
 
 
-def _store_inference_tick(data: dict) -> None:
-    total_w = data.get("total_demand_w")
-    if total_w is None and data.get("total_demand") is not None:
-        total_w = data["total_demand"]
+def _apply_inference_tick(data: dict) -> None:
+    """Atomically update in-memory dashboard + load cache (must be synchronous)."""
+    data.setdefault("ts", time.time())
     append_inference_tick(data)
+    total_w = data.get("total_demand_w", data.get("total_demand"))
     if total_w is not None:
         set_model_load_demand(
             day=int(data["day"]),
@@ -59,42 +60,37 @@ def _store_inference_tick(data: dict) -> None:
         )
 
 
+def _record_tick_to_disk(data: dict) -> None:
+    try:
+        record_inference_tick(data)
+    except Exception as e:
+        print(f"inference run recording error: {e}")
+
+
 @app.route("/api/inference_tick", methods=["POST"])
 def post_inference_tick():
     data = request.get_json(force=True, silent=True) or {}
-    data.setdefault("ts", time.time())
-    # Disk writes for run recording can be slow — don't block the HTTP response.
-    threading.Thread(target=_store_inference_tick, args=(data,), daemon=True).start()
+    _apply_inference_tick(data)
+    threading.Thread(target=_record_tick_to_disk, args=(data,), daemon=True).start()
     return jsonify({"ok": True})
 
 
 @app.route("/api/load_demand", methods=["GET", "POST"])
 def load_demand():
-    """Load Pico polls GET; inference.py POSTs load + chart telemetry each tick."""
+    """Load Pico polls GET; inference POSTs full tick payload here or on /api/inference_tick."""
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
-        data.setdefault("ts", time.time())
         if data.get("tick_profit_cents") is not None:
+            _apply_inference_tick(data)
+            threading.Thread(target=_record_tick_to_disk, args=(data,), daemon=True).start()
+        else:
             total_w = data.get("total_demand_w", data.get("total_demand"))
-            if total_w is not None:
+            if total_w is not None and data.get("tick") is not None and data.get("day") is not None:
                 set_model_load_demand(
                     day=int(data["day"]),
                     tick=int(data["tick"]),
                     total_demand_w=float(total_w),
                 )
-            threading.Thread(target=_store_inference_tick, args=(data,), daemon=True).start()
-        elif data.get("total_demand") is not None:
-            set_model_load_demand(
-                day=int(data["day"]),
-                tick=int(data["tick"]),
-                total_demand_w=float(data["total_demand"]),
-            )
-        elif data.get("total_demand_w") is not None:
-            set_model_load_demand(
-                day=int(data["day"]),
-                tick=int(data["tick"]),
-                total_demand_w=float(data["total_demand_w"]),
-            )
         return jsonify({"ok": True})
     return jsonify(get_model_load_demand())
 

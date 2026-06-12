@@ -12,7 +12,7 @@ LAPTOP_IP = "10.36.4.205"
 FLASK_HOST = "0.0.0.0"
 FLASK_PORT = 8000
 # Local hotspot gateway (run `ipconfig` on laptop when on hotspot — NOT the phone's public IP).
-HOTSPOT_GATEWAY = "10.36.4.204"
+HOTSPOT_GATEWAY = "10.36.4.129"
 # -----------------------------------------------------------------------------
 # Input Picos (telemetry) — set IPs from each Pico's serial boot log ("Pico IP:")
 # Do NOT use LAPTOP_IP here; .3 is the laptop, not a Pico.
@@ -52,3 +52,8 @@ SC_ACTION_WATTS_SCALE = 3.0
 POLL_TIMEOUT_S = 1
 ACTION_TIMEOUT_S = 1
 TICK_INTERVAL_S = 5
+# Inference must finish input phase within ~5s Azure tick — don't block on slow Picos.
+INFERENCE_PICO_TIMEOUT_S = 0.35
+INFERENCE_ACTION_TIMEOUT_S = 0.4
+CLOUD_TICK_TIMEOUT_S = 2.0
+CLOUD_SNAPSHOT_TIMEOUT_S = 4.0

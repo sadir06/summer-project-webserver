@@ -1,17 +1,19 @@
+import concurrent.futures
+
 import requests
 
-from hardware.config import CLOUD_BASE_URL, POLL_TIMEOUT_S
+from hardware.config import CLOUD_BASE_URL, CLOUD_SNAPSHOT_TIMEOUT_S, CLOUD_TICK_TIMEOUT_S
 
 
-def _fetch_json(path: str) -> dict | list:
-    response = requests.get(f"{CLOUD_BASE_URL}/{path}", timeout=POLL_TIMEOUT_S * 5)
+def _fetch_json(path: str, *, timeout_s: float) -> dict | list:
+    response = requests.get(f"{CLOUD_BASE_URL}/{path}", timeout=timeout_s)
     response.raise_for_status()
     return response.json()
 
 
 def fetch_cloud_tick_day() -> tuple[int | None, int | None]:
     """Lightweight poll for game tick/day only (used while waiting for next tick)."""
-    price = _fetch_json("price")
+    price = _fetch_json("price", timeout_s=CLOUD_TICK_TIMEOUT_S)
     tick = price.get("tick")
     day = price.get("day")
     return (
@@ -21,18 +23,22 @@ def fetch_cloud_tick_day() -> tuple[int | None, int | None]:
 
 
 def fetch_cloud_snapshot() -> dict:
-    sun = _fetch_json("sun")
-    price = _fetch_json("price")
-    demand = _fetch_json("demand")
-    deferables = _fetch_json("deferables")
+    """Fetch Azure inputs for inference (price, demand, deferables — no sun)."""
+    timeout_s = CLOUD_SNAPSHOT_TIMEOUT_S
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        price_f = pool.submit(_fetch_json, "price", timeout_s=timeout_s)
+        demand_f = pool.submit(_fetch_json, "demand", timeout_s=timeout_s)
+        defer_f = pool.submit(_fetch_json, "deferables", timeout_s=timeout_s)
+        price = price_f.result()
+        demand = demand_f.result()
+        deferables = defer_f.result()
 
-    tick = price.get("tick", demand.get("tick", sun.get("tick") if isinstance(sun, dict) else None))
+    tick = price.get("tick", demand.get("tick"))
     day = price.get("day", demand.get("day"))
 
     return {
         "tick": tick,
         "day": day,
-        "sun": sun.get("sun") if isinstance(sun, dict) else sun,
         "demand": demand.get("demand") if isinstance(demand, dict) else None,
         "buy_price": price.get("buy_price"),
         "sell_price": price.get("sell_price"),

@@ -1,6 +1,8 @@
 import argparse
+import concurrent.futures
 import random
 import sys
+import threading
 import time
 
 import requests
@@ -28,13 +30,85 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from hardware.actions import send_actions, send_load_demand  # noqa: E402
 from hardware.cloud import fetch_cloud_snapshot, fetch_cloud_tick_day  # noqa: E402
-from hardware.config import FLASK_PORT, LAPTOP_IP, TICK_INTERVAL_S  # noqa: E402
+from hardware.config import (  # noqa: E402
+    FLASK_PORT,
+    INFERENCE_ACTION_TIMEOUT_S,
+    LAPTOP_IP,
+    TICK_INTERVAL_S,
+)
+from hardware.poller import read_hardware_for_inference  # noqa: E402
 from hardware.inference_publish import (  # noqa: E402
     estimate_grid_power_w,
     publish_inference_tick,
     tick_profit_cents,
 )
-from hardware.poller import read_hardware  # noqa: E402
+TICK_POLL_S = 0.25
+
+
+def _fatal_tick_sync(msg: str) -> None:
+    print(f"FATAL: {msg}")
+    sys.exit(1)
+
+
+def _check_no_tick_skip(
+    *,
+    last_tick: int | None,
+    last_day: int | None,
+    tick: int,
+    day: int,
+    context: str,
+) -> None:
+    if last_tick is None:
+        return
+    if day != last_day:
+        return
+    if tick > last_tick + 1:
+        missed = tick - last_tick - 1
+        _fatal_tick_sync(
+            f"{context}: Azure tick jumped {last_tick} -> {tick} "
+            f"(missed {missed} tick(s) on day {day})"
+        )
+    if tick <= last_tick:
+        _fatal_tick_sync(
+            f"{context}: Azure tick went backwards or repeated "
+            f"(last={last_tick}, got={tick}, day={day})"
+        )
+
+
+def _wait_for_next_azure_tick(last_tick: int | None, last_day: int | None) -> tuple[int, int]:
+    """Block until the elec server tick/day advances; abort if any tick was skipped."""
+    while True:
+        try:
+            tick_poll, day_poll = fetch_cloud_tick_day()
+        except Exception as e:
+            print(f"tick wait error: {e}")
+            time.sleep(1)
+            continue
+        if tick_poll is None or day_poll is None:
+            time.sleep(TICK_POLL_S)
+            continue
+        if last_tick is None:
+            return tick_poll, day_poll
+        if day_poll != last_day:
+            return tick_poll, day_poll
+        if tick_poll > last_tick:
+            _check_no_tick_skip(
+                last_tick=last_tick,
+                last_day=last_day,
+                tick=tick_poll,
+                day=day_poll,
+                context="while waiting for next tick",
+            )
+            return tick_poll, day_poll
+        time.sleep(TICK_POLL_S)
+
+
+def _fetch_inputs_for_tick() -> tuple[dict, dict]:
+    """Parallel Azure snapshot + fast Pico poll (wall time ≈ max of the two)."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        cloud_future = pool.submit(fetch_cloud_snapshot)
+        hardware_future = pool.submit(read_hardware_for_inference)
+        return cloud_future.result(), hardware_future.result()
 
 
 def parse_args():
@@ -260,46 +334,43 @@ def run_live(args, env_class, device: torch.device) -> None:
         f"(set laptop Wi-Fi IP to {LAPTOP_IP} on the hotspot)"
     )
     print(
-        f"Dashboard telemetry: POST http://127.0.0.1:{FLASK_PORT}/api/inference_tick "
+        f"Dashboard telemetry: POST http://{LAPTOP_IP}:{FLASK_PORT}/api/inference_tick "
         f"(start Flask first for live charts)"
     )
     print("waiting for cloud + hardware inputs...")
     print(f"sync: one inference step per Azure tick (~{TICK_INTERVAL_S}s on game server)")
+    print("input: Azure price+demand+deferables, Pico pvout+vcap only (no sun, no cap /p)")
+    print("policy: exit immediately if any Azure tick is skipped or cycle exceeds budget")
 
     while True:
-        loop_start = time.perf_counter()
-
-        while True:
-            try:
-                tick_poll, day_poll = fetch_cloud_tick_day()
-            except Exception as e:
-                print(f"tick wait error: {e}")
-                time.sleep(1)
-                continue
-            if tick_poll is None or day_poll is None:
-                time.sleep(0.5)
-                continue
-            if last_tick is None:
-                break
-            if tick_poll != last_tick or day_poll != last_day:
-                break
-            time.sleep(1.0)
+        expected_tick, expected_day = _wait_for_next_azure_tick(last_tick, last_day)
 
         try:
             input_start = time.perf_counter()
-            cloud = fetch_cloud_snapshot()
-            hardware = read_hardware()
+            cloud, hardware = _fetch_inputs_for_tick()
             input_ms = (time.perf_counter() - input_start) * 1000.0
         except Exception as e:
-            print(f"poll error: {e}")
-            time.sleep(1)
-            continue
+            _fatal_tick_sync(f"input fetch failed: {e}")
 
         tick = cloud.get("tick")
         day = cloud.get("day")
-        if tick is None:
-            time.sleep(0.5)
-            continue
+        if tick is None or day is None:
+            _fatal_tick_sync("Azure snapshot missing tick or day")
+
+        tick_i, day_i = int(tick), int(day)
+        if tick_i != expected_tick or day_i != expected_day:
+            _fatal_tick_sync(
+                f"snapshot drifted while fetching "
+                f"(expected tick={expected_tick} day={expected_day}, "
+                f"got tick={tick_i} day={day_i})"
+            )
+        _check_no_tick_skip(
+            last_tick=last_tick,
+            last_day=last_day,
+            tick=tick_i,
+            day=day_i,
+            context="after input fetch",
+        )
 
         day_buffer.reset_if_new_day(day)
 
@@ -310,9 +381,7 @@ def run_live(args, env_class, device: torch.device) -> None:
 
         pvout_w = hardware.get("pvout")
         vcap_v = hardware.get("vcap")
-        pcout_w = hardware.get("pcout")
         pv_w = float(pvout_w) if pvout_w is not None else 0.0
-        pcout_f = float(pcout_w) if pcout_w is not None else None
         vcap_f = float(vcap_v) if vcap_v is not None else None
         supercap_en = (
             voltage_to_supercap_en(float(vcap_v), env_class)
@@ -357,7 +426,7 @@ def run_live(args, env_class, device: torch.device) -> None:
             total_demand_w=demand_output,
             pv_w=pv_w,
             sc_action=sc_action,
-            pcout_w=pcout_f,
+            pcout_w=None,
         )
         profit_cents = tick_profit_cents(
             grid_import_w=grid_import_w,
@@ -366,7 +435,7 @@ def run_live(args, env_class, device: torch.device) -> None:
             sell_price=sell_price,
         )
 
-        output_start = time.perf_counter()
+        publish_start = time.perf_counter()
         flask_ok = publish_inference_tick(
             {
                 "tick": int(tick),
@@ -377,7 +446,7 @@ def run_live(args, env_class, device: torch.device) -> None:
                 "pv_w": pv_w,
                 "sc_action": float(sc_action),
                 "sc_bus_w": sc_bus_w,
-                "pcout_w": pcout_f,
+                "pcout_w": sc_bus_w,
                 "vcap_v": vcap_f,
                 "grid_import_w": grid_import_w,
                 "grid_export_w": grid_export_w,
@@ -386,18 +455,43 @@ def run_live(args, env_class, device: torch.device) -> None:
                 "tick_profit_cents": profit_cents,
             }
         )
-        results = send_actions(sc_action, grid_action=grid_action)
-        pico_load_ok = send_load_demand(
-            day=int(day),
-            tick=int(tick),
-            total_demand_w=demand_output,
-        )
-        results["load"] = flask_ok
-        results["load_pico"] = pico_load_ok
-        output_ms = (time.perf_counter() - output_start) * 1000.0
+        publish_ms = (time.perf_counter() - publish_start) * 1000.0
+        output_ms = publish_ms
+
+        pico_results: dict[str, bool] = {"load": flask_ok, "load_pico": True}
+
+        def _send_pico_actions() -> None:
+            r = send_actions(
+                sc_action,
+                grid_action=grid_action,
+                timeout_s=INFERENCE_ACTION_TIMEOUT_S,
+            )
+            r["load"] = flask_ok
+            r["load_pico"] = send_load_demand(
+                day=int(day),
+                tick=int(tick),
+                total_demand_w=demand_output,
+            )
+            pico_results.update(r)
+
+        pico_thread = threading.Thread(target=_send_pico_actions, daemon=True)
+        pico_thread.start()
+        pico_thread.join(timeout=INFERENCE_ACTION_TIMEOUT_S + 0.15)
+        results = dict(pico_results)
 
         total_ms = input_ms + process_ms + output_ms
         budget_ms = TICK_INTERVAL_S * 1000.0
+        if total_ms > budget_ms:
+            print(
+                f"  bench: input={input_ms:.1f}ms "
+                f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
+                f"flask={publish_ms:.1f}ms total={total_ms:.1f}ms "
+                f"budget={budget_ms:.0f}ms"
+            )
+            _fatal_tick_sync(
+                f"tick {tick_i} processing took {total_ms:.0f}ms "
+                f"(budget {budget_ms:.0f}ms) — would skip next Azure tick"
+            )
 
         print(
             f"tick={tick} day={day} pv_w={pv_w:.3f} demand={demand:.3f} "
@@ -406,8 +500,9 @@ def run_live(args, env_class, device: torch.device) -> None:
         print(
             f"  bench: input={input_ms:.1f}ms "
             f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
-            f"output={output_ms:.1f}ms total={total_ms:.1f}ms "
-            f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
+            f"flask={publish_ms:.1f}ms pico=async "
+            f"total={total_ms:.1f}ms budget={budget_ms:.0f}ms "
+            f"headroom={budget_ms - total_ms:.1f}ms"
         )
 
         if args.prototype >= 3:
@@ -425,13 +520,8 @@ def run_live(args, env_class, device: torch.device) -> None:
             )
         print(action_line)
 
-        last_tick = tick
-        last_day = day
-
-        elapsed = time.perf_counter() - loop_start
-        sleep_s = max(0.0, TICK_INTERVAL_S - elapsed)
-        if sleep_s > 0:
-            time.sleep(sleep_s)
+        last_tick = tick_i
+        last_day = day_i
 
 
 def main():

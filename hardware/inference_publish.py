@@ -45,7 +45,6 @@ def estimate_grid_power_w(
     if pcout_w is not None:
         sc_bus_w = float(pcout_w)
     else:
-        # Model convention: negative sc_action = discharge → supplies bus
         sc_bus_w = -float(sc_action) * SC_ACTION_WATTS_SCALE
 
     net_grid_w = float(total_demand_w) - float(pv_w) - sc_bus_w
@@ -72,28 +71,12 @@ def _flask_base() -> str:
 
 
 def publish_inference_tick(payload: dict) -> bool:
-    """POST tick metrics to Flask (charts + GET /api/load_demand for Load Pico)."""
+    """Single atomic POST — updates load_demand + charts together on Flask."""
     global _publish_failures
 
     body = _sanitize_payload(payload)
     if body.get("total_demand_w") is not None:
         body["total_demand"] = body["total_demand_w"]
-
-    load_ok = False
-    charts_ok = False
-
-    try:
-        response = requests.post(
-            f"{_flask_base()}/api/load_demand",
-            json=body,
-            timeout=3.0,
-        )
-        response.raise_for_status()
-        load_ok = True
-    except Exception as e:
-        _publish_failures += 1
-        if _publish_failures <= 3 or _publish_failures % 25 == 0:
-            print(f"Error POST {_flask_base()}/api/load_demand: {e}")
 
     try:
         response = requests.post(
@@ -102,12 +85,10 @@ def publish_inference_tick(payload: dict) -> bool:
             timeout=3.0,
         )
         response.raise_for_status()
-        charts_ok = True
-    except Exception as e:
-        if _publish_failures <= 3 or _publish_failures % 25 == 0:
-            print(f"Error POST {_flask_base()}/api/inference_tick: {e}")
-
-    if load_ok or charts_ok:
         _publish_failures = 0
         return True
-    return False
+    except Exception as e:
+        _publish_failures += 1
+        if _publish_failures <= 3 or _publish_failures % 25 == 0:
+            print(f"Error POST {_flask_base()}/api/inference_tick: {e}")
+        return False

@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "started_at": 1781270883.8964932,
+    "started_at_iso": "2026-06-12T13:28:03.896493+00:00",
+    "run_name": "hardware_day1clear",
+    "tick_count": 2,
+    "cumulative_profit_cents": -706.4363410580736,
+    "last_updated": 1781270932.1205075,
+    "last_updated_iso": "2026-06-12T13:28:52.120510+00:00"
+  },
+  "summary": {
+    "cumulative_profit_cents": -706.4363410580736,
+    "tick_count": 2
+  },
+  "ticks": [
+    {
+      "tick": 38,
+      "day": 5937569,
+      "instant_demand_w": 3.0230770404276455,
+      "defer_power_w": 6.847283657407388e-05,
+      "total_demand_w": 3.0231455132706357,
+      "pv_w": 0.0,
+      "sc_action": -0.9999977350234985,
+      "sc_bus_w": -0.0012328718,
+      "pcout_w": -0.0012328718,
+      "vcap_v": 7.535362,
+      "grid_import_w": 3.024378385070636,
+      "grid_export_w": 0.0,
+      "buy_price": 32.0,
+      "sell_price": 64.0,
+      "tick_profit_cents": -483.9005416113017,
+      "total_demand": 3.0231455132706357,
+      "ts": 1781270895.4411469,
+      "cumulative_profit_cents": -483.9005416113017,
+      "record_index": 1
+    },
+    {
+      "tick": 40,
+      "day": 5937569,
+      "instant_demand_w": 1.2171557892965574,
+      "defer_power_w": 0.8059766888618469,
+      "total_demand_w": 2.023132505923381,
+      "pv_w": 0.000578675,
+      "sc_action": -0.8806139230728149,
+      "sc_bus_w": -0.00049889132,
+      "pcout_w": -0.00049889132,
+      "vcap_v": 7.535362,
+      "grid_import_w": 2.023052722243381,
+      "grid_export_w": 0.0,
+      "buy_price": 22.0,
+      "sell_price": 45.0,
+      "tick_profit_cents": -222.5357994467719,
+      "total_demand": 2.023132505923381,
+      "ts": 1781270904.140652,
+      "cumulative_profit_cents": -706.4363410580736,
+      "record_index": 2
+    }
+  ]
+}
