@@ -2,7 +2,6 @@ import argparse
 import concurrent.futures
 import random
 import sys
-import threading
 import time
 
 import requests
@@ -75,8 +74,20 @@ def _check_no_tick_skip(
         )
 
 
-def _wait_for_next_azure_tick(last_tick: int | None, last_day: int | None) -> tuple[int, int]:
-    """Block until the elec server tick/day advances; abort if any tick was skipped."""
+def _fetch_inputs_for_tick() -> tuple[dict, dict]:
+    """Parallel Azure snapshot + fast Pico poll (wall time ≈ max of the two)."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        cloud_future = pool.submit(fetch_cloud_snapshot)
+        hardware_future = pool.submit(read_hardware_for_inference)
+        return cloud_future.result(), hardware_future.result()
+
+
+def _wait_and_fetch_inputs(
+    last_tick: int | None,
+    last_day: int | None,
+) -> tuple[dict, dict, float, float]:
+    """Wait for Azure tick advance, then fetch snapshot+hardware immediately (one tick)."""
+    wait_start = time.perf_counter()
     while True:
         try:
             tick_poll, day_poll = fetch_cloud_tick_day()
@@ -87,11 +98,13 @@ def _wait_for_next_azure_tick(last_tick: int | None, last_day: int | None) -> tu
         if tick_poll is None or day_poll is None:
             time.sleep(TICK_POLL_S)
             continue
-        if last_tick is None:
-            return tick_poll, day_poll
-        if day_poll != last_day:
-            return tick_poll, day_poll
-        if tick_poll > last_tick:
+
+        advanced = last_tick is None or day_poll != last_day or tick_poll > last_tick
+        if not advanced:
+            time.sleep(TICK_POLL_S)
+            continue
+
+        if last_tick is not None:
             _check_no_tick_skip(
                 last_tick=last_tick,
                 last_day=last_day,
@@ -99,16 +112,25 @@ def _wait_for_next_azure_tick(last_tick: int | None, last_day: int | None) -> tu
                 day=day_poll,
                 context="while waiting for next tick",
             )
-            return tick_poll, day_poll
-        time.sleep(TICK_POLL_S)
+        break
 
+    wait_ms = (time.perf_counter() - wait_start) * 1000.0
+    fetch_start = time.perf_counter()
+    cloud, hardware = _fetch_inputs_for_tick()
+    fetch_ms = (time.perf_counter() - fetch_start) * 1000.0
+    tick_i = int(cloud["tick"])
+    day_i = int(cloud["day"])
 
-def _fetch_inputs_for_tick() -> tuple[dict, dict]:
-    """Parallel Azure snapshot + fast Pico poll (wall time ≈ max of the two)."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        cloud_future = pool.submit(fetch_cloud_snapshot)
-        hardware_future = pool.submit(read_hardware_for_inference)
-        return cloud_future.result(), hardware_future.result()
+    if last_tick is not None:
+        _check_no_tick_skip(
+            last_tick=last_tick,
+            last_day=last_day,
+            tick=tick_i,
+            day=day_i,
+            context="after input fetch",
+        )
+
+    return cloud, hardware, wait_ms, fetch_ms
 
 
 def parse_args():
@@ -340,15 +362,14 @@ def run_live(args, env_class, device: torch.device) -> None:
     print("waiting for cloud + hardware inputs...")
     print(f"sync: one inference step per Azure tick (~{TICK_INTERVAL_S}s on game server)")
     print("input: Azure price+demand+deferables, Pico pvout+vcap only (no sun, no cap /p)")
-    print("policy: exit immediately if any Azure tick is skipped or cycle exceeds budget")
+    print(
+        "policy: exit on tick skip or if fetch+infer+flask exceeds 5s "
+        "(Azure wait time is not counted)"
+    )
 
     while True:
-        expected_tick, expected_day = _wait_for_next_azure_tick(last_tick, last_day)
-
         try:
-            input_start = time.perf_counter()
-            cloud, hardware = _fetch_inputs_for_tick()
-            input_ms = (time.perf_counter() - input_start) * 1000.0
+            cloud, hardware, wait_ms, fetch_ms = _wait_and_fetch_inputs(last_tick, last_day)
         except Exception as e:
             _fatal_tick_sync(f"input fetch failed: {e}")
 
@@ -358,19 +379,6 @@ def run_live(args, env_class, device: torch.device) -> None:
             _fatal_tick_sync("Azure snapshot missing tick or day")
 
         tick_i, day_i = int(tick), int(day)
-        if tick_i != expected_tick or day_i != expected_day:
-            _fatal_tick_sync(
-                f"snapshot drifted while fetching "
-                f"(expected tick={expected_tick} day={expected_day}, "
-                f"got tick={tick_i} day={day_i})"
-            )
-        _check_no_tick_skip(
-            last_tick=last_tick,
-            last_day=last_day,
-            tick=tick_i,
-            day=day_i,
-            context="after input fetch",
-        )
 
         day_buffer.reset_if_new_day(day)
 
@@ -458,38 +466,28 @@ def run_live(args, env_class, device: torch.device) -> None:
         publish_ms = (time.perf_counter() - publish_start) * 1000.0
         output_ms = publish_ms
 
-        pico_results: dict[str, bool] = {"load": flask_ok, "load_pico": True}
+        results = send_actions(
+            sc_action,
+            grid_action=grid_action,
+            timeout_s=INFERENCE_ACTION_TIMEOUT_S,
+        )
+        results["load"] = flask_ok
+        results["load_pico"] = send_load_demand(
+            day=int(day),
+            tick=int(tick),
+            total_demand_w=demand_output,
+        )
 
-        def _send_pico_actions() -> None:
-            r = send_actions(
-                sc_action,
-                grid_action=grid_action,
-                timeout_s=INFERENCE_ACTION_TIMEOUT_S,
-            )
-            r["load"] = flask_ok
-            r["load_pico"] = send_load_demand(
-                day=int(day),
-                tick=int(tick),
-                total_demand_w=demand_output,
-            )
-            pico_results.update(r)
-
-        pico_thread = threading.Thread(target=_send_pico_actions, daemon=True)
-        pico_thread.start()
-        pico_thread.join(timeout=INFERENCE_ACTION_TIMEOUT_S + 0.15)
-        results = dict(pico_results)
-
-        total_ms = input_ms + process_ms + output_ms
+        work_ms = fetch_ms + process_ms + output_ms
         budget_ms = TICK_INTERVAL_S * 1000.0
-        if total_ms > budget_ms:
+        if work_ms > budget_ms:
             print(
-                f"  bench: input={input_ms:.1f}ms "
-                f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
-                f"flask={publish_ms:.1f}ms total={total_ms:.1f}ms "
-                f"budget={budget_ms:.0f}ms"
+                f"  bench: wait={wait_ms:.1f}ms fetch={fetch_ms:.1f}ms "
+                f"process={process_ms:.1f}ms flask={publish_ms:.1f}ms "
+                f"work={work_ms:.1f}ms budget={budget_ms:.0f}ms"
             )
             _fatal_tick_sync(
-                f"tick {tick_i} processing took {total_ms:.0f}ms "
+                f"tick {tick_i} fetch+infer+flask took {work_ms:.0f}ms "
                 f"(budget {budget_ms:.0f}ms) — would skip next Azure tick"
             )
 
@@ -498,11 +496,10 @@ def run_live(args, env_class, device: torch.device) -> None:
             f"sc_en={supercap_en:.3f}"
         )
         print(
-            f"  bench: input={input_ms:.1f}ms "
+            f"  bench: wait={wait_ms:.1f}ms fetch={fetch_ms:.1f}ms "
             f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
-            f"flask={publish_ms:.1f}ms pico=async "
-            f"total={total_ms:.1f}ms budget={budget_ms:.0f}ms "
-            f"headroom={budget_ms - total_ms:.1f}ms"
+            f"flask={publish_ms:.1f}ms pico=sync work={work_ms:.1f}ms "
+            f"budget={budget_ms:.0f}ms headroom={budget_ms - work_ms:.1f}ms"
         )
 
         if args.prototype >= 3:

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import requests
-
 from hardware.config import FLASK_PORT, LAPTOP_IP, SC_ACTION_WATTS_SCALE, TICK_INTERVAL_S
+from hardware.http_client import lan_post
 
 _publish_failures = 0
 
@@ -79,7 +78,7 @@ def publish_inference_tick(payload: dict) -> bool:
         body["total_demand"] = body["total_demand_w"]
 
     try:
-        response = requests.post(
+        response = lan_post(
             f"{_flask_base()}/api/inference_tick",
             json=body,
             timeout=3.0,

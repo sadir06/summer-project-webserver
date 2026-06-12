@@ -1,5 +1,3 @@
-import requests
-
 from hardware.config import (
     ACTION_QUERY_PARAM,
     ACTION_TIMEOUT_S,
@@ -10,6 +8,7 @@ from hardware.config import (
     PICO_URL_DEF_ACTION,
     SC_ACTION_WATTS_SCALE,
 )
+from hardware.pico_http import pico_get_for_base
 
 
 def _scale_sc_action(sc_action: float) -> float:
@@ -24,8 +23,9 @@ def send_action(name: str, value: float, *, timeout_s: float | None = None) -> b
     url = f"{endpoint['base_url']}{endpoint['path']}"
     timeout = ACTION_TIMEOUT_S if timeout_s is None else timeout_s
     try:
-        response = requests.get(
-            url,
+        response = pico_get_for_base(
+            endpoint["base_url"],
+            endpoint["path"],
             params={ACTION_QUERY_PARAM: float(value)},
             timeout=timeout,
         )

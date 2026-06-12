@@ -1,12 +1,11 @@
 import concurrent.futures
 
-import requests
-
 from hardware.config import CLOUD_BASE_URL, CLOUD_SNAPSHOT_TIMEOUT_S, CLOUD_TICK_TIMEOUT_S
+from hardware.http_client import cloud_get
 
 
 def _fetch_json(path: str, *, timeout_s: float) -> dict | list:
-    response = requests.get(f"{CLOUD_BASE_URL}/{path}", timeout=timeout_s)
+    response = cloud_get(f"{CLOUD_BASE_URL}/{path}", timeout=timeout_s)
     response.raise_for_status()
     return response.json()
 

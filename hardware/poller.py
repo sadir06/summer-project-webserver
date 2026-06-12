@@ -1,14 +1,13 @@
 import concurrent.futures
 import json
 
-import requests
-
 from hardware.config import (
     INFERENCE_PICO_TIMEOUT_S,
     PICO_CAP_DATA_URL,
     PICO_ENDPOINTS,
     POLL_TIMEOUT_S,
 )
+from hardware.pico_http import pico_get_for_base
 
 _last_known: dict[str, float | None] = {
     "pvout": None,
@@ -18,7 +17,7 @@ _last_known: dict[str, float | None] = {
 
 
 def _poll_plain(base_url: str, path: str, timeout_s: float) -> float:
-    response = requests.get(f"{base_url}{path}", timeout=timeout_s)
+    response = pico_get_for_base(base_url, path, timeout=timeout_s)
     response.raise_for_status()
     text = response.text.strip().splitlines()[0].strip()
     try:
@@ -28,7 +27,7 @@ def _poll_plain(base_url: str, path: str, timeout_s: float) -> float:
 
 
 def _poll_cap_voltage(timeout_s: float) -> float:
-    response = requests.get(f"{PICO_CAP_DATA_URL}/data", timeout=timeout_s)
+    response = pico_get_for_base(PICO_CAP_DATA_URL, "/data", timeout=timeout_s)
     response.raise_for_status()
     payload = response.json()
     if isinstance(payload, dict) and "va" in payload:
@@ -123,7 +122,8 @@ def read_hardware_for_inference() -> dict[str, float | None]:
 
 
 def poll_hardware(cache: dict, lock) -> None:
-    readings = read_hardware()
+    """Dashboard poll: pvout + vcap only (no cap /p — avoids hammering Cap Pico)."""
+    readings = read_hardware_for_inference()
     with lock:
         for field, value in readings.items():
             if value is not None:

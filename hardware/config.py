@@ -53,7 +53,8 @@ POLL_TIMEOUT_S = 1
 ACTION_TIMEOUT_S = 1
 TICK_INTERVAL_S = 5
 # Inference must finish input phase within ~5s Azure tick — don't block on slow Picos.
-INFERENCE_PICO_TIMEOUT_S = 0.35
-INFERENCE_ACTION_TIMEOUT_S = 0.4
+# Cap Pico HTTP is single-threaded — allow time when Flask poller shares the board.
+INFERENCE_PICO_TIMEOUT_S = 0.8
+INFERENCE_ACTION_TIMEOUT_S = 0.8
 CLOUD_TICK_TIMEOUT_S = 2.0
 CLOUD_SNAPSHOT_TIMEOUT_S = 4.0
