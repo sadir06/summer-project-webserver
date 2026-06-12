@@ -14,7 +14,7 @@ MPPT Pico firmware
 
 1. Start Flask on the laptop: `python -m webserver.middleware.app`
 2. Flask polls Azure and caches `sun` + `tick` in memory.
-3. MPPT firmware calls `GET http://172.20.10.4:8000/api/sun_data` and reads JSON `{"sun": ..., "tick": ...}`.
+3. MPPT firmware calls `GET http://172.20.10.3:8000/api/sun_data` and reads JSON `{"sun": ..., "tick": ...}`.
 
 `inference.py` is separate: it reads Azure + Pico telemetry directly. Flask is still required for the MPPT Pico.
 
@@ -26,27 +26,27 @@ Your phone may show a **public** IP on the internet (e.g. `104.28.89.52`). That 
 |---------|---------|----------|
 | Public (cellular/WAN) | `104.28.89.52` | Internet-facing only — **ignore for Pico/laptop config** |
 | Local hotspot gateway | Often `172.20.10.1` or `192.168.x.1` | Wi-Fi gateway on your laptop |
-| Laptop (static) | `172.20.10.4` | Flask + what MPPT Pico polls |
+| Laptop (static) | `172.20.10.3` | Flask + what Picos poll |
 | Pico (DHCP) | e.g. `172.20.10.5`, `.8` | `PICO_URL_PV`, `PICO_URL_CP` in config |
 
 After joining the hotspot, run `ipconfig` on the laptop and use the **Default Gateway** on the Wi-Fi adapter as `HOTSPOT_GATEWAY` in `hardware/config.py` if it is not `172.20.10.1`.
 
-## Set laptop IP to 172.20.10.4 (Windows)
+## Set laptop IP to 172.20.10.3 (Windows)
 
-MPPT firmware hardcodes `SUN_SERVER_HOST = "172.20.10.4"`. When connected to the phone hotspot:
+When connected to the phone hotspot:
 
 1. Settings → Network & Internet → Wi-Fi → your hotspot name → Properties
 2. Edit IP assignment → **Manual**
 3. Set:
-   - IP address: `172.20.10.4`
+   - IP address: `172.20.10.3`
    - Subnet mask: `255.255.255.0`
    - Gateway: `172.20.10.1` (usually the phone)
    - DNS: `8.8.8.8` (or leave automatic)
-4. Save, then verify: `ipconfig` should show `172.20.10.4` on the Wi-Fi adapter.
+4. Save, then verify: `ipconfig` should show `172.20.10.3` on the Wi-Fi adapter.
 
 If your phone hotspot uses a different subnet (e.g. `192.168.x.x`), either:
 
-- Change the laptop static IP to match that subnet **and** reflash the MPPT Pico with an updated `SUN_SERVER_HOST`, or
+- Change the laptop static IP to match that subnet **and** update Pico firmware server URLs to match, or
 - Use a hotspot that assigns `172.20.10.x` addresses.
 
 ## Configure Pico IPs in `hardware/config.py`
@@ -105,7 +105,7 @@ Set `ACTIONS_ENABLED = True` in `hardware/config.py` once this handler exists.
 **Load Pico:** each tick `inference.py` sends model-computed load to the Load Pico (not Azure):
 
 1. **POST** `http://<LOAD_PICO_IP>/demand` with JSON body, and
-2. **Mirror** on Flask `GET http://172.20.10.4:8000/api/load_demand` (for Pico polling, same pattern as sun).
+2. **Mirror** on Flask `GET http://172.20.10.3:8000/api/load_demand` (for Pico polling, same pattern as sun).
 
 ```json
 {"day": 5937300, "tick": 45, "total_demand": 1.164}
@@ -122,7 +122,7 @@ Set `PICO_URL_DEF_ACTION` in `hardware/config.py` to the Load Pico IP.
 ## Quick connectivity tests (from laptop)
 
 ```powershell
-curl http://172.20.10.4:8000/api/sun_data
+curl http://172.20.10.3:8000/api/sun_data
 curl http://<MPPT_PICO_IP>/pout
 curl http://<CAP_PICO_IP>/pout
 curl http://<CAP_PICO_IP>/data

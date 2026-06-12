@@ -46,24 +46,56 @@ def get_inference_run():
     return jsonify(get_recording_state())
 
 
+def _store_inference_tick(data: dict) -> None:
+    total_w = data.get("total_demand_w")
+    if total_w is None and data.get("total_demand") is not None:
+        total_w = data["total_demand"]
+    append_inference_tick(data)
+    if total_w is not None:
+        set_model_load_demand(
+            day=int(data["day"]),
+            tick=int(data["tick"]),
+            total_demand_w=float(total_w),
+        )
+
+
 @app.route("/api/inference_tick", methods=["POST"])
 def post_inference_tick():
     data = request.get_json(force=True, silent=True) or {}
     data.setdefault("ts", time.time())
-    append_inference_tick(data)
-    # Mirror load command for Load Pico polling (inference runs in another process).
-    if data.get("total_demand_w") is not None:
-        set_model_load_demand(
-            day=int(data["day"]),
-            tick=int(data["tick"]),
-            total_demand_w=float(data["total_demand_w"]),
-        )
+    # Disk writes for run recording can be slow — don't block the HTTP response.
+    threading.Thread(target=_store_inference_tick, args=(data,), daemon=True).start()
     return jsonify({"ok": True})
 
 
-@app.route("/api/load_demand")
-def get_load_demand():
-    """Load Pico polls this for model total_demand (instant + defer), each tick."""
+@app.route("/api/load_demand", methods=["GET", "POST"])
+def load_demand():
+    """Load Pico polls GET; inference.py POSTs load + chart telemetry each tick."""
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        data.setdefault("ts", time.time())
+        if data.get("tick_profit_cents") is not None:
+            total_w = data.get("total_demand_w", data.get("total_demand"))
+            if total_w is not None:
+                set_model_load_demand(
+                    day=int(data["day"]),
+                    tick=int(data["tick"]),
+                    total_demand_w=float(total_w),
+                )
+            threading.Thread(target=_store_inference_tick, args=(data,), daemon=True).start()
+        elif data.get("total_demand") is not None:
+            set_model_load_demand(
+                day=int(data["day"]),
+                tick=int(data["tick"]),
+                total_demand_w=float(data["total_demand"]),
+            )
+        elif data.get("total_demand_w") is not None:
+            set_model_load_demand(
+                day=int(data["day"]),
+                tick=int(data["tick"]),
+                total_demand_w=float(data["total_demand_w"]),
+            )
+        return jsonify({"ok": True})
     return jsonify(get_model_load_demand())
 
 
@@ -118,4 +150,4 @@ if __name__ == "__main__":
     print(f"Flask listening on {FLASK_HOST}:{FLASK_PORT}")
     print(f"MPPT Pico should poll: http://{LAPTOP_IP}:{FLASK_PORT}/api/sun_data")
     print(f"Load Pico should poll: http://{LAPTOP_IP}:{FLASK_PORT}/api/load_demand")
-    app.run(host=FLASK_HOST, port=FLASK_PORT)
+    app.run(host=FLASK_HOST, port=FLASK_PORT, threaded=True)

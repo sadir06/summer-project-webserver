@@ -9,6 +9,17 @@ def _fetch_json(path: str) -> dict | list:
     return response.json()
 
 
+def fetch_cloud_tick_day() -> tuple[int | None, int | None]:
+    """Lightweight poll for game tick/day only (used while waiting for next tick)."""
+    price = _fetch_json("price")
+    tick = price.get("tick")
+    day = price.get("day")
+    return (
+        int(tick) if tick is not None else None,
+        int(day) if day is not None else None,
+    )
+
+
 def fetch_cloud_snapshot() -> dict:
     sun = _fetch_json("sun")
     price = _fetch_json("price")

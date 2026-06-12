@@ -8,7 +8,11 @@ from hardware.config import PICO_CAP_DATA_URL, PICO_ENDPOINTS, POLL_TIMEOUT_S
 def _poll_plain(base_url: str, path: str) -> float | None:
     response = requests.get(f"{base_url}{path}", timeout=POLL_TIMEOUT_S)
     response.raise_for_status()
-    return float(response.text.strip())
+    text = response.text.strip().splitlines()[0].strip()
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"non-numeric response from {base_url}{path}: {text[:80]!r}") from None
 
 
 def _poll_cap_voltage() -> float | None:

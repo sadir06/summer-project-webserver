@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from hardware.actions import send_actions, send_load_demand  # noqa: E402
-from hardware.cloud import fetch_cloud_snapshot  # noqa: E402
+from hardware.cloud import fetch_cloud_snapshot, fetch_cloud_tick_day  # noqa: E402
 from hardware.config import FLASK_PORT, LAPTOP_IP, TICK_INTERVAL_S  # noqa: E402
 from hardware.inference_publish import (  # noqa: E402
     estimate_grid_power_w,
@@ -264,9 +264,27 @@ def run_live(args, env_class, device: torch.device) -> None:
         f"(start Flask first for live charts)"
     )
     print("waiting for cloud + hardware inputs...")
+    print(f"sync: one inference step per Azure tick (~{TICK_INTERVAL_S}s on game server)")
 
     while True:
         loop_start = time.perf_counter()
+
+        while True:
+            try:
+                tick_poll, day_poll = fetch_cloud_tick_day()
+            except Exception as e:
+                print(f"tick wait error: {e}")
+                time.sleep(1)
+                continue
+            if tick_poll is None or day_poll is None:
+                time.sleep(0.5)
+                continue
+            if last_tick is None:
+                break
+            if tick_poll != last_tick or day_poll != last_day:
+                break
+            time.sleep(1.0)
+
         try:
             input_start = time.perf_counter()
             cloud = fetch_cloud_snapshot()
@@ -284,11 +302,6 @@ def run_live(args, env_class, device: torch.device) -> None:
             continue
 
         day_buffer.reset_if_new_day(day)
-
-        if tick == last_tick and day == last_day:
-            elapsed = time.perf_counter() - loop_start
-            time.sleep(max(0.2, 1.0 - elapsed))
-            continue
 
         demand = float(cloud.get("demand") or 0.0)
         buy_price = float(cloud.get("buy_price") or 0.0)
@@ -338,29 +351,6 @@ def run_live(args, env_class, device: torch.device) -> None:
             tick_dur_s=TICK_INTERVAL_S,
         )
 
-        output_start = time.perf_counter()
-        results = send_actions(sc_action, grid_action=grid_action)
-        load_sent = send_load_demand(
-            day=int(day),
-            tick=int(tick),
-            total_demand_w=demand_output,
-        )
-        results["load"] = load_sent
-        output_ms = (time.perf_counter() - output_start) * 1000.0
-
-        total_ms = input_ms + process_ms + output_ms
-        budget_ms = TICK_INTERVAL_S * 1000.0
-
-        print(
-            f"tick={tick} day={day} pv_w={pv_w:.3f} demand={demand:.3f} "
-            f"sc_en={supercap_en:.3f}"
-        )
-        print(
-            f"  bench: input={input_ms:.1f}ms "
-            f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
-            f"output={output_ms:.1f}ms total={total_ms:.1f}ms "
-            f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
-        )
         defer_en = total_deferrable_energy(defer_state)
         defer_power_w = defer_en * def_action / TICK_INTERVAL_S
         grid_import_w, grid_export_w, sc_bus_w = estimate_grid_power_w(
@@ -375,7 +365,9 @@ def run_live(args, env_class, device: torch.device) -> None:
             buy_price=buy_price,
             sell_price=sell_price,
         )
-        publish_inference_tick(
+
+        output_start = time.perf_counter()
+        flask_ok = publish_inference_tick(
             {
                 "tick": int(tick),
                 "day": int(day),
@@ -393,6 +385,29 @@ def run_live(args, env_class, device: torch.device) -> None:
                 "sell_price": sell_price,
                 "tick_profit_cents": profit_cents,
             }
+        )
+        results = send_actions(sc_action, grid_action=grid_action)
+        pico_load_ok = send_load_demand(
+            day=int(day),
+            tick=int(tick),
+            total_demand_w=demand_output,
+        )
+        results["load"] = flask_ok
+        results["load_pico"] = pico_load_ok
+        output_ms = (time.perf_counter() - output_start) * 1000.0
+
+        total_ms = input_ms + process_ms + output_ms
+        budget_ms = TICK_INTERVAL_S * 1000.0
+
+        print(
+            f"tick={tick} day={day} pv_w={pv_w:.3f} demand={demand:.3f} "
+            f"sc_en={supercap_en:.3f}"
+        )
+        print(
+            f"  bench: input={input_ms:.1f}ms "
+            f"process={process_ms:.1f}ms (infer={infer_ms:.1f}ms) "
+            f"output={output_ms:.1f}ms total={total_ms:.1f}ms "
+            f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
         )
 
         if args.prototype >= 3:

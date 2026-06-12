@@ -5,11 +5,11 @@ from hardware.config import (
     ACTION_TIMEOUT_S,
     ACTIONS_ENABLED,
     LOAD_DEMAND_PATH,
+    LOAD_DEMAND_POST_ENABLED,
     PICO_ACTION_ENDPOINTS,
     PICO_URL_DEF_ACTION,
     SC_ACTION_WATTS_SCALE,
 )
-from hardware.load_demand import set_model_load_demand
 
 
 def _scale_sc_action(sc_action: float) -> float:
@@ -36,20 +36,21 @@ def send_action(name: str, value: float) -> bool:
 
 
 def send_load_demand(*, day: int, tick: int, total_demand_w: float) -> bool:
-    """Send model total load (instant + defer) to Load Pico as JSON.
+    """Optional POST to Load Pico. Flask mirror is done via publish_inference_tick()."""
+    if not LOAD_DEMAND_POST_ENABLED:
+        return True
 
-    Payload: {"day": ..., "tick": ..., "total_demand": <watts>}
-    Also mirrored on Flask GET /api/load_demand for Pico polling.
-    """
-    set_model_load_demand(day=day, tick=tick, total_demand_w=total_demand_w)
-    payload = {
-        "day": int(day),
-        "tick": int(tick),
-        "total_demand": float(total_demand_w),
-    }
     url = f"{PICO_URL_DEF_ACTION}{LOAD_DEMAND_PATH}"
     try:
-        response = requests.post(url, json=payload, timeout=ACTION_TIMEOUT_S)
+        response = requests.post(
+            url,
+            json={
+                "day": int(day),
+                "tick": int(tick),
+                "total_demand": float(total_demand_w),
+            },
+            timeout=ACTION_TIMEOUT_S,
+        )
         response.raise_for_status()
         return True
     except Exception as e:

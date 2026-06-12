@@ -1,0 +1,8 @@
+{
+  "started_at": 1781258735.393615,
+  "started_at_iso": "2026-06-12T10:05:35.393615+00:00",
+  "run_name": "hardware_day1",
+  "prototype": 3,
+  "checkpoint": "C:\\Users\\sadir\\Documents\\Github Projects\\summer-project-webserver\\RL Training\\checkpoints\\prototype_3\\policy_latest.pth",
+  "mode": "live"
+}
