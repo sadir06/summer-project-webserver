@@ -124,6 +124,91 @@
         </article>
       </section>
 
+      <section class="inference-section" id="inference-section" aria-label="Live inference">
+        <div class="inference-section__header">
+          <div>
+            <p class="inference-section__eyebrow">RL policy · live session</p>
+            <h2 class="inference-section__title">Inference dashboard</h2>
+            <p class="inference-section__desc">
+              Tracks model inputs and outputs each tick while <code>inference.py</code> runs.
+              Resets when Flask restarts.
+            </p>
+          </div>
+          <div class="inference-hero">
+            <div class="inference-hero__stat inference-hero__stat--pnl">
+              <span class="inference-hero__label">Session P&amp;L</span>
+              <span class="inference-hero__value" id="inference-pnl-total">—</span>
+              <span class="inference-hero__sub" id="inference-pnl-sub">Waiting for inference…</span>
+            </div>
+            <div class="inference-hero__stat">
+              <span class="inference-hero__label">Last tick profit</span>
+              <span class="inference-hero__value inference-hero__value--sm" id="inference-pnl-tick">—</span>
+            </div>
+            <div class="inference-hero__stat">
+              <span class="inference-hero__label">Ticks logged</span>
+              <span class="inference-hero__value inference-hero__value--sm" id="inference-tick-count">0</span>
+            </div>
+          </div>
+        </div>
+
+        <article class="panel panel--chart panel--pnl">
+          <div class="panel__header">
+            <div>
+              <h2>Cumulative profit &amp; loss</h2>
+              <p class="panel__desc">Smoothed session curve from estimated grid import/export each tick</p>
+            </div>
+            <span class="panel__badge panel__badge--live" id="inference-live-badge">Standby</span>
+          </div>
+          <div class="chart-wrap chart-wrap--tall">
+            <canvas id="pnl-chart" aria-label="Cumulative profit and loss"></canvas>
+          </div>
+        </article>
+
+        <div class="inference-chart-grid">
+          <article class="panel panel--chart">
+            <div class="panel__header">
+              <div>
+                <h2>Grid SMPS power</h2>
+                <p class="panel__desc">Estimated draw from grid (total load − PV − cap contribution)</p>
+              </div>
+              <span class="legend-item legend-item--grid">Import (W)</span>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="grid-chart" aria-label="Grid import power"></canvas>
+            </div>
+          </article>
+
+          <article class="panel panel--chart">
+            <div class="panel__header">
+              <div>
+                <h2>Model load command</h2>
+                <p class="panel__desc">Total demand sent to Load Pico (instant + defer)</p>
+              </div>
+              <span class="legend-item legend-item--load">Total demand (W)</span>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="load-chart" aria-label="Total load demand"></canvas>
+            </div>
+          </article>
+
+          <article class="panel panel--chart panel--span-2">
+            <div class="panel__header">
+              <div>
+                <h2>Supercapacitor</h2>
+                <p class="panel__desc">Charge/discharge rate (Pico) and terminal voltage</p>
+              </div>
+              <div class="chart-legend">
+                <span class="legend-item legend-item--cap-p">Cap P (W)</span>
+                <span class="legend-item legend-item--cap-v">Cap V (V)</span>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="cap-chart" aria-label="Capacitor power and voltage"></canvas>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section class="panel panel--chart">
         <div class="panel__header">
           <div>
@@ -169,6 +254,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="{{ url_for('static', filename='js/inference-charts.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

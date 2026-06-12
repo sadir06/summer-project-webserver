@@ -311,6 +311,9 @@ async function poll() {
     console.log("PCOUT:", state.pcout);
 
     renderState(state);
+    if (window.InferenceCharts && state.inference) {
+      window.InferenceCharts.render(state.inference);
+    }
     setConnectionState(true, "Live");
   } catch (err) {
     setConnectionState(false, "Offline");

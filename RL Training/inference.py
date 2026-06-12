@@ -27,6 +27,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from hardware.actions import send_actions, send_load_demand  # noqa: E402
 from hardware.cloud import fetch_cloud_snapshot  # noqa: E402
 from hardware.config import FLASK_PORT, LAPTOP_IP, TICK_INTERVAL_S  # noqa: E402
+from hardware.inference_publish import (  # noqa: E402
+    estimate_grid_power_w,
+    publish_inference_tick,
+    tick_profit_cents,
+)
 from hardware.poller import read_hardware  # noqa: E402
 
 
@@ -219,6 +224,10 @@ def run_live(args, env_class, device: torch.device) -> None:
         f"http://{LAPTOP_IP}:{FLASK_PORT}/api/sun_data "
         f"(set laptop Wi-Fi IP to {LAPTOP_IP} on the hotspot)"
     )
+    print(
+        f"Dashboard telemetry: POST http://127.0.0.1:{FLASK_PORT}/api/inference_tick "
+        f"(start Flask first for live charts)"
+    )
     print("waiting for cloud + hardware inputs...")
 
     while True:
@@ -253,7 +262,10 @@ def run_live(args, env_class, device: torch.device) -> None:
 
         pvout_w = hardware.get("pvout")
         vcap_v = hardware.get("vcap")
+        pcout_w = hardware.get("pcout")
         pv_w = float(pvout_w) if pvout_w is not None else 0.0
+        pcout_f = float(pcout_w) if pcout_w is not None else None
+        vcap_f = float(vcap_v) if vcap_v is not None else None
         supercap_en = (
             voltage_to_supercap_en(float(vcap_v), env_class)
             if vcap_v is not None
@@ -315,6 +327,39 @@ def run_live(args, env_class, device: torch.device) -> None:
             f"budget={budget_ms:.0f}ms headroom={budget_ms - total_ms:.1f}ms"
         )
         defer_en = total_deferrable_energy(defer_state)
+        defer_power_w = defer_en * def_action / TICK_INTERVAL_S
+        grid_import_w, grid_export_w, sc_bus_w = estimate_grid_power_w(
+            total_demand_w=demand_output,
+            pv_w=pv_w,
+            sc_action=sc_action,
+            pcout_w=pcout_f,
+        )
+        profit_cents = tick_profit_cents(
+            grid_import_w=grid_import_w,
+            grid_export_w=grid_export_w,
+            buy_price=buy_price,
+            sell_price=sell_price,
+        )
+        publish_inference_tick(
+            {
+                "tick": int(tick),
+                "day": int(day),
+                "instant_demand_w": demand,
+                "defer_power_w": defer_power_w,
+                "total_demand_w": demand_output,
+                "pv_w": pv_w,
+                "sc_action": float(sc_action),
+                "sc_bus_w": sc_bus_w,
+                "pcout_w": pcout_f,
+                "vcap_v": vcap_f,
+                "grid_import_w": grid_import_w,
+                "grid_export_w": grid_export_w,
+                "buy_price": buy_price,
+                "sell_price": sell_price,
+                "tick_profit_cents": profit_cents,
+            }
+        )
+
         if args.prototype >= 3:
             action_line = (
                 f"  actions: sc={sc_action:+.3f} def_frac={def_action:+.3f} "

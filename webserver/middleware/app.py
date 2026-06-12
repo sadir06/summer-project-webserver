@@ -1,9 +1,11 @@
 from pathlib import Path
 import threading
+import time
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 from hardware.config import FLASK_HOST, FLASK_PORT, LAPTOP_IP
+from hardware.inference_telemetry import append_inference_tick, get_inference_telemetry
 from hardware.load_demand import get_model_load_demand
 from webserver.middleware.poller import poll_loop
 from webserver.middleware.state import cache, lock
@@ -20,7 +22,17 @@ app = Flask(
 @app.route("/api/state")
 def get_state():
     with lock:
-        return jsonify(cache)
+        payload = dict(cache)
+    payload["inference"] = get_inference_telemetry()
+    return jsonify(payload)
+
+
+@app.route("/api/inference_tick", methods=["POST"])
+def post_inference_tick():
+    data = request.get_json(force=True, silent=True) or {}
+    data.setdefault("ts", time.time())
+    append_inference_tick(data)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/load_demand")
