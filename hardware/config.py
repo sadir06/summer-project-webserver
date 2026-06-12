@@ -18,7 +18,7 @@ HOTSPOT_GATEWAY = "172.20.10.1"
 # Input Picos (telemetry) — set IPs from each Pico's serial boot log ("Pico IP:")
 # Do NOT use LAPTOP_IP here; .4 is the laptop, not a Pico.
 # -----------------------------------------------------------------------------
-PICO_URL_PV = "http://172.20.10.8"  # MPPT Pico (MPPTfinal) — update after boot
+PICO_URL_PV = "http://172.20.10.4"  # MPPT Pico (MPPTfinal) — update after boot
 PICO_URL_CP = "http://172.20.10.2"  # Capacitor Pico (capwifi)
 
 PICO_ENDPOINTS = {
@@ -37,7 +37,7 @@ ACTIONS_ENABLED = False
 ACTION_QUERY_PARAM = "value"
 
 PICO_URL_GRID_ACTION = "http://172.20.10.6"  # PLACEHOLDER
-PICO_URL_DEF_ACTION = "http://172.20.10.7"  # Load Pico — update after boot
+PICO_URL_DEF_ACTION = "http://172.20.10.7"  # unused if Load Pico polls /api/load_demand
 LOAD_DEMAND_PATH = "/demand"  # POST JSON {day, tick, total_demand}
 
 PICO_ACTION_ENDPOINTS = {

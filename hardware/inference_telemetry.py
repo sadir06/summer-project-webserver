@@ -6,6 +6,8 @@ import threading
 import time
 from typing import Any
 
+from hardware.inference_recorder import record_inference_tick
+
 MAX_TICKS = 120
 
 _lock = threading.Lock()
@@ -33,6 +35,7 @@ def append_inference_tick(record: dict[str, Any]) -> None:
         _summary["last_day"] = record.get("day")
         _summary["last_updated"] = record.get("ts") or time.time()
         _summary["active"] = True
+    record_inference_tick(record)
 
 
 def get_inference_telemetry() -> dict[str, Any]:

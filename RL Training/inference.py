@@ -2,6 +2,8 @@ import argparse
 import random
 import sys
 import time
+
+import requests
 from copy import deepcopy
 from pathlib import Path
 
@@ -51,6 +53,16 @@ def parse_args():
         help="1=env4, 2=proto2, 3=proto3 profitable (default 3)",
     )
     parser.add_argument("--seed", type=int, default=0, help="Day picker seed (eval mode only)")
+    parser.add_argument(
+        "--new-run",
+        action="store_true",
+        help="Start a new inference recording run on Flask (data/inference_runs/)",
+    )
+    parser.add_argument(
+        "--run-name",
+        default=None,
+        help="Optional label for the inference run folder",
+    )
     return parser.parse_args()
 
 
@@ -219,6 +231,29 @@ def run_live(args, env_class, device: torch.device) -> None:
     print(f"checkpoint={checkpoint_path}")
     print(f"device={device}")
     print(f"tick_interval={TICK_INTERVAL_S}s")
+
+    if args.new_run:
+        try:
+            response = requests.post(
+                f"http://127.0.0.1:{FLASK_PORT}/api/inference_run/start",
+                json={
+                    "run_name": args.run_name,
+                    "meta": {
+                        "prototype": args.prototype,
+                        "checkpoint": str(checkpoint_path),
+                        "mode": "live",
+                    },
+                },
+                timeout=2.0,
+            )
+            response.raise_for_status()
+            run_dir = response.json().get("run_dir", "?")
+            print(f"inference recording started -> {run_dir}")
+        except Exception as e:
+            print(
+                f"warning: could not start inference recording on Flask "
+                f"(is app running with --new-inference-run?): {e}"
+            )
     print(
         f"MPPT Pico needs Flask running: "
         f"http://{LAPTOP_IP}:{FLASK_PORT}/api/sun_data "
