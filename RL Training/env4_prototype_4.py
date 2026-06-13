@@ -71,14 +71,11 @@ class SmartGridEnv(gym.Env):
     scLimitActionThreshold = 0.05
     voltageLimitEpsilonV = 0.02
 
-    # PV: independent normal draw per tick (lab hardware; not derived from sun)
-    pvGenMean = 3.5
-    pvGenStd = 2.0
+    # PV: uniform random per tick in [0, pvPowerMax] W (lab demo; not derived from sun)
 
     @classmethod
     def samplePvPower(cls, rng: random.Random) -> float:
-        power = rng.gauss(cls.pvGenMean, cls.pvGenStd)
-        return float(np.clip(power, 0.0, cls.pvPowerMax))
+        return float(rng.uniform(0.0, cls.pvPowerMax))
 
     @classmethod
     def is_at_min_voltage(cls, voltage: float) -> bool:

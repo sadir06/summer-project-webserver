@@ -312,9 +312,9 @@ def main():
     )
     if args.prototype >= 4:
         log(
-            f"obs_dim={obs_dim} | data: PV=Normal(3.5,2)W/tick | "
+            f"obs_dim={obs_dim} | data: PV=Uniform(0,{env_class.pvPowerMax})W/tick | "
             "cross-day=same-tick mean over prior 7 days | "
-            "momentum=6-tick Δprice + intraday range position",
+            "momentum=6-tick buy/sell delta + intraday range position",
             log_file,
         )
     elif args.prototype >= 3:

@@ -76,7 +76,7 @@ def load_split_manifest(project_root: Path, complete_days: dict[int, list[dict]]
 
 
 def sample_day_pv_gen(day_id: int, prototype: int = 2) -> list[float]:
-    """Independent PV series per day (normal draw per tick; not derived from sun)."""
+    """Independent PV series per day (uniform random per tick in [0, 7] W; not from sun)."""
     rng = random.Random(day_id)
     if prototype >= 4:
         sampler = SmartGridEnvProto4.samplePvPower

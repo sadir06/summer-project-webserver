@@ -63,7 +63,7 @@ From `data_collection/data/ticks.jsonl` (80/20 split, seed 42):
 
 | Field | Source |
 |-------|--------|
-| **PV** | Normal(3.5 W, σ=2) per tick, clipped [0, 7 W] — **not** from `sun` |
+| **PV** | Uniform random **[0, 7] W** per tick — **not** from `sun` |
 | **Demand** | `demand` from ticks (instant load, W) |
 | **Prices** | Raw `buy_price` / `sell_price` (cents/J); profit uses E = P × 5 s |
 | **Deferables** | `energy`, `start`, `end` from tick 0 row |
