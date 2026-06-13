@@ -279,6 +279,7 @@ def main():
     args = parse_args()
     act_dim = act_dim_for_prototype(args.prototype)
     env_class, env_name = load_env_module(args.prototype)
+    obs_dim = int(env_class.obsDim) if hasattr(env_class, "obsDim") else OBS_DIM
     checkpoint_dir = RL_DIR / "checkpoints" / f"prototype_{args.prototype}"
     log_file = RL_DIR / "logs" / f"train_ppo_prototype_{args.prototype}.log"
 
@@ -335,7 +336,6 @@ def main():
     EnvClass = make_real_env(
         env_class, train_profiles, seed=SEED, prototype=args.prototype
     )
-    obs_dim = int(env_class.obsDim) if hasattr(env_class, "obsDim") else OBS_DIM
     envs = [EnvClass() for _ in range(max(1, args.num_envs))]
     policy = PolicyNet(obs_dim, act_dim).to(DEVICE)
     value_net = ValueNet(obs_dim).to(DEVICE)
