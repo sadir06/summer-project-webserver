@@ -22,6 +22,7 @@ import numpy as np
 import torch
 
 from load_days import load_day_data, profile_to_reset_options
+from price_obs import cross_day_options_for_profile
 from networks import PolicyNet
 
 RL_DIR = Path(__file__).resolve().parent
@@ -36,7 +37,7 @@ def parse_args():
         "--prototype",
         type=int,
         default=3,
-        choices=[1, 2, 3],
+        choices=[1, 2, 3, 4],
         help="Environment prototype (default 3)",
     )
     parser.add_argument(
@@ -60,6 +61,10 @@ def parse_args():
 
 
 def load_env_module(prototype: int):
+    if prototype == 4:
+        from env4_prototype_4 import SmartGridEnv
+
+        return SmartGridEnv
     if prototype == 3:
         from env4_prototype_3 import SmartGridEnv
 
@@ -109,8 +114,10 @@ def resolve_checkpoint(prototype: int, checkpoint_arg: str | None) -> Path:
     return candidates[0]
 
 
-def load_policy(prototype: int, checkpoint_path: Path, device: torch.device) -> PolicyNet:
-    policy = PolicyNet(obs_dim=14, act_dim=act_dim_for_prototype(prototype)).to(device)
+def load_policy(
+    prototype: int, checkpoint_path: Path, device: torch.device, obs_dim: int
+) -> PolicyNet:
+    policy = PolicyNet(obs_dim=obs_dim, act_dim=act_dim_for_prototype(prototype)).to(device)
     policy.load_state_dict(
         torch.load(checkpoint_path, map_location=device, weights_only=True)
     )
@@ -135,8 +142,20 @@ def run_day(
     device: torch.device,
     prototype: int,
     profile: dict,
+    *,
+    sorted_profiles: list[dict] | None = None,
 ) -> dict:
-    reset_options = profile_to_reset_options(profile, prototype)
+    cross_day = None
+    if prototype >= 4 and sorted_profiles is not None:
+        from env4_prototype_4 import SmartGridEnv as SmartGridEnvProto4
+
+        cross_day = cross_day_options_for_profile(
+            profile,
+            sorted_profiles,
+            SmartGridEnvProto4.crossDayHistoryDays,
+            env.ticksPerDay,
+        )
+    reset_options = profile_to_reset_options(profile, prototype, cross_day=cross_day)
     reset_options["deferables"] = deepcopy(reset_options["deferables"])
     obs, _info = env.reset(options=reset_options)
 
@@ -194,11 +213,14 @@ def main():
     device = torch.device(args.device)
     env_class = load_env_module(args.prototype)
     checkpoint_path = resolve_checkpoint(args.prototype, args.checkpoint)
-    policy = load_policy(args.prototype, checkpoint_path, device)
+    obs_dim = int(getattr(env_class, "obsDim", 14))
+    policy = load_policy(args.prototype, checkpoint_path, device, obs_dim)
 
     _train, test_profiles, manifest = load_day_data(PROJECT_ROOT, prototype=args.prototype)
     if not test_profiles:
         raise RuntimeError("No test profiles in split manifest")
+
+    sorted_test = sorted(test_profiles, key=lambda p: p["day_id"])
 
     if args.limit is not None:
         test_profiles = test_profiles[: args.limit]
@@ -207,7 +229,7 @@ def main():
     n_days = len(test_profiles)
     n_ticks = n_days * env.ticksPerDay
 
-    print(f"prototype={args.prototype} env={env_class.__module__}")
+    print(f"prototype={args.prototype} env={env_class.__module__} obs_dim={obs_dim}")
     print(f"checkpoint={checkpoint_path}")
     print(f"device={device}")
     print(
@@ -221,7 +243,14 @@ def main():
     wall_start = time.perf_counter()
     results = []
     for i, profile in enumerate(test_profiles):
-        day_result = run_day(env, policy, device, args.prototype, profile)
+        day_result = run_day(
+            env,
+            policy,
+            device,
+            args.prototype,
+            profile,
+            sorted_profiles=sorted_test if args.prototype >= 4 else None,
+        )
         results.append(day_result)
         if (i + 1) % 50 == 0 or i + 1 == n_days:
             print(f"  evaluated {i + 1}/{n_days} days...")

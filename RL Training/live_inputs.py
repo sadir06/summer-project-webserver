@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
+from price_obs import (
+    CrossDayPriceArchive,
+    compute_price_momentum,
+    cross_day_features_at_tick,
+)
+
 MAX_PRICE_LEGACY = 150.0
 
 
@@ -9,6 +15,23 @@ def voltage_to_supercap_en(voltage: float, env_class) -> float:
     physical_energy = 0.5 * env_class.supercapCF * (voltage**2)
     usable = physical_energy - env_class.minPhysicalSupercapEn
     return float(np.clip(usable, 0.0, env_class.maxSupercapEn))
+
+
+def effective_sc_action_for_voltage(
+    sc_action: float,
+    vcap_v: float | None,
+    env_class,
+) -> float:
+    """Clip SC command when hardware is already at min/max voltage (proto 4+ live profit)."""
+    if vcap_v is None:
+        return float(sc_action)
+    eps = getattr(env_class, "voltageLimitEpsilonV", 0.02)
+    v = float(vcap_v)
+    if v <= env_class.supercapMinV + eps and sc_action < 0.0:
+        return 0.0
+    if v >= env_class.supercapMaxV - eps and sc_action > 0.0:
+        return 0.0
+    return float(sc_action)
 
 
 def parse_deferables(deferables_raw: list[dict]) -> list[dict]:
@@ -65,8 +88,9 @@ class DaySeriesBuffer:
         }
 
     def get_price_projection(self, cur_tick: int, env_class) -> tuple[float, float, float, float, float]:
-        start_tick = cur_tick
-        end_tick = min(env_class.ticksPerDay, cur_tick + env_class.priceLookaheadTicks)
+        """Rolling window over ticks seen so far today (no future oracle)."""
+        end_tick = cur_tick + 1
+        start_tick = max(0, end_tick - env_class.priceLookaheadTicks)
         data_tick = min(cur_tick, env_class.ticksPerDay - 1)
 
         def values_for(field: str, fallback: float) -> list[float]:
@@ -103,6 +127,21 @@ class DaySeriesBuffer:
         )
 
 
+def _today_price_lists(
+    series: dict[int, dict[str, float]],
+    data_tick: int,
+    buy_now: float,
+    sell_now: float,
+) -> tuple[list[float], list[float]]:
+    buy_prices: list[float] = []
+    sell_prices: list[float] = []
+    for t in range(data_tick + 1):
+        row = series.get(t, {})
+        buy_prices.append(float(row.get("buy_price", buy_now)))
+        sell_prices.append(float(row.get("sell_price", sell_now)))
+    return buy_prices, sell_prices
+
+
 def build_observation(
     env_class,
     tick: int,
@@ -113,6 +152,7 @@ def build_observation(
     supercap_en: float,
     defer_state: list[dict],
     day_buffer: DaySeriesBuffer,
+    cross_day_archive: CrossDayPriceArchive | None = None,
 ) -> np.ndarray:
     data_tick = min(int(tick), env_class.ticksPerDay - 1)
     buy_norm, sell_norm = _price_obs_norm(env_class, buy_price_raw, sell_price_raw)
@@ -161,25 +201,76 @@ def build_observation(
     else:
         projected_future_net_norm = projected_future_net_en / max_projected_net_en
 
-    obs = np.array(
-        [
-            time_sin,
-            time_cos,
-            pv_norm,
-            sc_energy_norm,
-            base_demand_norm,
-            buy_norm,
-            sell_norm,
-            total_def_norm,
-            due_soon_norm,
-            net_norm,
-            avg_future_buy_norm,
-            avg_future_sell_norm,
-            cap_free_norm,
-            projected_future_net_norm,
-        ],
-        dtype=np.float32,
-    )
+    obs_dim = int(getattr(env_class, "obsDim", 14))
+    base_obs = [
+        time_sin,
+        time_cos,
+        pv_norm,
+        sc_energy_norm,
+        base_demand_norm,
+        buy_norm,
+        sell_norm,
+        total_def_norm,
+        due_soon_norm,
+        net_norm,
+        avg_future_buy_norm,
+        avg_future_sell_norm,
+        cap_free_norm,
+        projected_future_net_norm,
+    ]
+
+    if obs_dim > 14:
+        if cross_day_archive is not None:
+            cross_mean_buy_norm, cross_mean_sell_norm, cross_std_buy_norm = (
+                cross_day_archive.stats_at_tick(
+                    data_tick,
+                    float(buy_price_raw),
+                    float(sell_price_raw),
+                    env_class.ticksPerDay,
+                    env_class.maxBuyPriceObs,
+                    env_class.maxSellPriceObs,
+                )
+            )
+        else:
+            cross_mean_buy_norm, cross_mean_sell_norm, cross_std_buy_norm = (
+                cross_day_features_at_tick(
+                    data_tick,
+                    float(buy_price_raw),
+                    float(sell_price_raw),
+                    None,
+                    None,
+                    None,
+                    env_class.maxBuyPriceObs,
+                    env_class.maxSellPriceObs,
+                )
+            )
+        buy_prices, sell_prices = _today_price_lists(
+            day_buffer.series, data_tick, float(buy_price_raw), float(sell_price_raw)
+        )
+        momentum_ticks = getattr(env_class, "priceMomentumTicks", env_class.priceLookaheadTicks)
+        buy_momentum_norm, sell_momentum_norm, buy_range_pos, sell_range_pos = (
+            compute_price_momentum(
+                buy_prices,
+                sell_prices,
+                data_tick,
+                momentum_ticks,
+                env_class.maxBuyPriceObs,
+                env_class.maxSellPriceObs,
+            )
+        )
+        base_obs.extend(
+            [
+                cross_mean_buy_norm,
+                cross_mean_sell_norm,
+                cross_std_buy_norm,
+                buy_momentum_norm,
+                sell_momentum_norm,
+                buy_range_pos,
+                sell_range_pos,
+            ]
+        )
+
+    obs = np.array(base_obs, dtype=np.float32)
     return np.clip(obs, env_class().observation_space.low, env_class().observation_space.high)
 
 
@@ -187,13 +278,41 @@ def total_deferrable_energy(defer_state: list[dict]) -> float:
     return float(sum(dd["remainingEn"] for dd in defer_state))
 
 
+def defer_headroom_w(instant_demand_w: float, *, load_max_w: float = 8.0) -> float:
+    """Load cap 8 W/tick: instant is served first; defer gets only the remainder."""
+    return max(0.0, float(load_max_w) - float(instant_demand_w))
+
+
+def compute_defer_power_served_w(
+    instant_demand_w: float,
+    defer_state: list[dict],
+    def_action: float,
+    tick_dur_s: float,
+    *,
+    load_max_w: float = 8.0,
+) -> float:
+    """Defer power actually served this tick (capped by 8W − instant and remaining defer J)."""
+    headroom = defer_headroom_w(instant_demand_w, load_max_w=load_max_w)
+    requested_w = float(def_action) * headroom
+    available_w = total_deferrable_energy(defer_state) / tick_dur_s
+    return min(requested_w, available_w)
+
+
 def compute_pico_demand_power(
     instant_demand: float,
     defer_state: list[dict],
     def_action: float,
     tick_dur_s: float,
+    *,
+    load_max_w: float = 8.0,
 ) -> float:
-    """Load Pico power = instant demand + deferrable power this tick."""
-    defer_power = total_deferrable_energy(defer_state) * float(def_action) / tick_dur_s
-    return min(float(instant_demand) + defer_power, 8.0)
-
+    """Total load power = instant (always) + defer served (≤ headroom below load_max_w)."""
+    defer_power = compute_defer_power_served_w(
+        instant_demand,
+        defer_state,
+        def_action,
+        tick_dur_s,
+        load_max_w=load_max_w,
+    )
+    return float(instant_demand) + defer_power
+

@@ -14,11 +14,11 @@ from networks import PolicyNet, ValueNet
 RL_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = RL_DIR.parent
 
-OBS_DIM = 14
+OBS_DIM = 14  # default; prototype 4 uses env.obsDim (21)
 
 TOTAL_UPDATES = 500
 EPISODES_PER_ROLLOUT = 32
-NUM_ENVS = 16
+NUM_ENVS = 4
 PPO_EPOCHS = 4
 CLIP_EPS = 0.2
 GAMMA = 0.99
@@ -39,8 +39,8 @@ def parse_args():
         "--prototype",
         type=int,
         default=2,
-        choices=[1, 2, 3],
-        help="1=env4, 2=proto2, 3=proto3 (frozen, default 2)",
+        choices=[1, 2, 3, 4],
+        help="1=env4, 2=proto2, 3=proto3 (frozen), 4=proto4 voltage-limit penalty (default 2)",
     )
     parser.add_argument("--updates", type=int, default=TOTAL_UPDATES)
     parser.add_argument("--episodes", type=int, default=EPISODES_PER_ROLLOUT)
@@ -63,6 +63,10 @@ def act_dim_for_prototype(prototype: int) -> int:
 
 
 def load_env_module(prototype: int):
+    if prototype == 4:
+        from env4_prototype_4 import SmartGridEnv
+
+        return SmartGridEnv, "env4_prototype_4"
     if prototype == 3:
         from env4_prototype_3 import SmartGridEnv
 
@@ -124,7 +128,7 @@ def collect_rollout_batched(
     ep_unmet_def = []
     ep_def_done = []
 
-    obs = np.zeros((num_envs, OBS_DIM), dtype=np.float32)
+    obs = np.zeros((num_envs, envs[0].observation_space.shape[0]), dtype=np.float32)
     for i, env in enumerate(envs):
         obs[i], _ = env.reset()
 
@@ -305,7 +309,14 @@ def main():
         f"(80/20 seed={manifest['split_seed']})",
         log_file,
     )
-    if args.prototype >= 3:
+    if args.prototype >= 4:
+        log(
+            f"obs_dim={obs_dim} | data: PV=Normal(3.5,2)W/tick | "
+            "cross-day=same-tick mean over prior 7 days | "
+            "momentum=6-tick Δprice + intraday range position",
+            log_file,
+        )
+    elif args.prototype >= 3:
         log(
             "metrics: profit_cents=totalProfitCents (higher=better) | "
             "import=grid spend cents | export=grid earnings cents | "
@@ -324,9 +335,10 @@ def main():
     EnvClass = make_real_env(
         env_class, train_profiles, seed=SEED, prototype=args.prototype
     )
+    obs_dim = int(env_class.obsDim) if hasattr(env_class, "obsDim") else OBS_DIM
     envs = [EnvClass() for _ in range(max(1, args.num_envs))]
-    policy = PolicyNet(OBS_DIM, act_dim).to(DEVICE)
-    value_net = ValueNet(OBS_DIM).to(DEVICE)
+    policy = PolicyNet(obs_dim, act_dim).to(DEVICE)
+    value_net = ValueNet(obs_dim).to(DEVICE)
     if args.compile and hasattr(torch, "compile"):
         policy = torch.compile(policy)
         value_net = torch.compile(value_net)

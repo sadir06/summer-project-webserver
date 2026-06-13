@@ -7,6 +7,8 @@ from pathlib import Path
 from env4 import SmartGridEnv
 from env4_prototype_2 import SmartGridEnv as SmartGridEnvProto2
 from env4_prototype_3 import SmartGridEnv as SmartGridEnvProto3
+from env4_prototype_4 import SmartGridEnv as SmartGridEnvProto4
+from price_obs import cross_day_options_for_profile
 
 TICKS_PER_DAY = SmartGridEnv.ticksPerDay
 MAX_PRICE = 150.0
@@ -73,10 +75,14 @@ def load_split_manifest(project_root: Path, complete_days: dict[int, list[dict]]
     return ensure_train_test_split(complete_days, manifest_path)
 
 
-def sample_day_pv_gen(day_id: int) -> list[float]:
-    """Independent PV series per day (not derived from sun/irradiance)."""
+def sample_day_pv_gen(day_id: int, prototype: int = 2) -> list[float]:
+    """Independent PV series per day (normal draw per tick; not derived from sun)."""
     rng = random.Random(day_id)
-    return [SmartGridEnvProto2.samplePvPower(rng) for _ in range(TICKS_PER_DAY)]
+    if prototype >= 4:
+        sampler = SmartGridEnvProto4.samplePvPower
+    else:
+        sampler = SmartGridEnvProto2.samplePvPower
+    return [sampler(rng) for _ in range(TICKS_PER_DAY)]
 
 
 def rows_to_day_profile(day_rows: list[dict], prototype: int = 2) -> dict:
@@ -95,7 +101,6 @@ def rows_to_day_profile(day_rows: list[dict], prototype: int = 2) -> dict:
         irradiance.append(SmartGridEnv.normalizeIrradiance(sun))
         base_demand.append(row.get("demand") or 0.0)
         if prototype >= 3:
-            pv_gen.append(SmartGridEnvProto3.sun_to_pv_w(sun))
             buy_price.append(float(row.get("buy_price") or 0.0))
             sell_price.append(float(row.get("sell_price") or 0.0))
         else:
@@ -120,14 +125,21 @@ def rows_to_day_profile(day_rows: list[dict], prototype: int = 2) -> dict:
         "sellPrice": sell_price,
         "deferables": deferables,
     }
-    if prototype >= 3:
-        profile["pvGen"] = pv_gen
+    if prototype >= 4:
+        profile["pvGen"] = sample_day_pv_gen(day_id, prototype=prototype)
+    elif prototype >= 3:
+        profile["pvGen"] = [
+            SmartGridEnvProto3.sun_to_pv_w(by_tick[t].get("sun") or 0.0)
+            for t in range(TICKS_PER_DAY)
+        ]
     else:
         profile["pvGen"] = sample_day_pv_gen(day_id)
     return profile
 
 
-def profile_to_reset_options(profile: dict, prototype: int) -> dict:
+def profile_to_reset_options(
+    profile: dict, prototype: int, *, cross_day: dict | None = None
+) -> dict:
     options = {
         "baseDemand": profile["baseDemand"],
         "buyPrice": profile["buyPrice"],
@@ -138,6 +150,8 @@ def profile_to_reset_options(profile: dict, prototype: int) -> dict:
         options["pvGen"] = profile["pvGen"]
     else:
         options["irradiance"] = profile["irradiance"]
+    if prototype >= 4 and cross_day:
+        options.update(cross_day)
     return options
 
 
@@ -177,6 +191,11 @@ def load_day_data(
 def make_real_env(env_class, day_profiles: list[dict], seed: int = 42, prototype: int = 2):
     """Build a real-data wrapper for any SmartGridEnv subclass."""
 
+    sorted_profiles = sorted(day_profiles, key=lambda p: p["day_id"])
+    cross_history_days = (
+        SmartGridEnvProto4.crossDayHistoryDays if prototype >= 4 else 0
+    )
+
     class SmartGridEnvReal(env_class):
         def __init__(self):
             super().__init__()
@@ -185,7 +204,17 @@ def make_real_env(env_class, day_profiles: list[dict], seed: int = 42, prototype
 
         def reset(self, seed=None, options=None):
             profile = self._rng.choice(self.day_profiles)
-            day_options = profile_to_reset_options(profile, prototype)
+            cross_day = None
+            if cross_history_days > 0:
+                cross_day = cross_day_options_for_profile(
+                    profile,
+                    sorted_profiles,
+                    cross_history_days,
+                    TICKS_PER_DAY,
+                )
+            day_options = profile_to_reset_options(
+                profile, prototype, cross_day=cross_day
+            )
             return super().reset(seed=seed, options=day_options)
 
     return SmartGridEnvReal
