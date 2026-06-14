@@ -127,6 +127,7 @@ def collect_rollout_batched(
     ep_unmet_base = []
     ep_unmet_def = []
     ep_def_done = []
+    ep_def_missed = []
 
     obs = np.zeros((num_envs, envs[0].observation_space.shape[0]), dtype=np.float32)
     for i, env in enumerate(envs):
@@ -190,6 +191,13 @@ def collect_rollout_batched(
                             if dd.get("served", False)
                         )
                     )
+                    ep_def_missed.append(
+                        sum(
+                            1
+                            for dd in env.dailyData["defDemandState"]
+                            if dd.get("missed", False)
+                        )
+                    )
                     day_import[i] = 0.0
                     day_export[i] = 0.0
                     day_reward[i] = 0.0
@@ -209,6 +217,7 @@ def collect_rollout_batched(
         "ep_unmet_base": ep_unmet_base,
         "ep_unmet_def": ep_unmet_def,
         "ep_def_done": ep_def_done,
+        "ep_def_missed": ep_def_missed,
         "steps": len(obs_list),
         "ticks_per_day": ticks_per_day,
     }
@@ -367,6 +376,7 @@ def main():
         avg_unmet_def = float(np.mean(batch["ep_unmet_def"]))
         avg_unmet = avg_unmet_base + avg_unmet_def
         avg_def_done = float(np.mean(batch["ep_def_done"]))
+        avg_def_missed = float(np.mean(batch["ep_def_missed"]))
 
         profit_history.append(avg_profit)
         unmet_history.append(avg_unmet)
@@ -378,7 +388,7 @@ def main():
             f"profit={avg_profit:+.1f} roll_profit={roll_profit:+.1f} | "
             f"import={avg_import:.1f} export={avg_export:.1f} | "
             f"unmet={avg_unmet:.0f} roll_unmet={roll_unmet:.0f} | "
-            f"def_done={avg_def_done:.1f}/3 reward={avg_reward:.0f} | "
+            f"def_done={avg_def_done:.1f}/3 def_missed={avg_def_missed:.2f} reward={avg_reward:.0f} | "
             f"rollout={rollout_s:.1f}s steps={batch['steps']}",
             log_file,
         )

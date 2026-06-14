@@ -65,7 +65,8 @@ class SmartGridEnv(gym.Env):
     gridSellPowerMax = 8.0
 
     profitRewardScale = 100.0
-    deferMissPenaltyPerJ_cents = 10
+    # Must dominate tick profit so agent never skips defer (typical task ~37 J, max 50 J)
+    deferMissPenaltyPerJ_cents = 200
     # Penalty for commanding SC past voltage limits (cents per J of wasted request)
     scLimitPenaltyPerJ_cents = 15.0
     scLimitActionThreshold = 0.05
