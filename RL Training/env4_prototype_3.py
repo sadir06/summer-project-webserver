@@ -5,14 +5,7 @@ import random
 
 
 class SmartGridEnv(gym.Env):
-    """Prototype 3 (frozen): profit-driven arbitrage — H100 run reached +profit ~update 174.
-
-  DO NOT change physics/reward knobs here; fork a new env module for experiments.
-  Training data from ticks.jsonl. Two actions: scAction, defAction. Auto PSU.
-  Tuned knobs: profitRewardScale=50, deferMissPenalty=5, defDemandATicks=30, maxDefPower=8.
-  """
-
-    # Supercapacitor physical model (hardware-aligned)
+    """Prototype 3 environment (frozen)."""
     supercapMinV = 10.35
     supercapMaxV = 16.25
     supercapCF = 0.65
@@ -22,7 +15,6 @@ class SmartGridEnv(gym.Env):
     maxPhysicalSupercapEn = 0.5 * supercapCF * (supercapMaxV**2)
     maxSupercapEn = maxPhysicalSupercapEn - minPhysicalSupercapEn
 
-    # Power limits (watts)
     loadDemandMax = 8.0
     pvPowerMax = 7.0
 
@@ -31,7 +23,6 @@ class SmartGridEnv(gym.Env):
 
     defDemandATicks = 30
 
-    # Raw price ranges from ticks.jsonl (cents/J); obs normalisation only
     maxBuyPriceObs = 95.0
     maxSellPriceObs = 191.0
 
@@ -47,13 +38,12 @@ class SmartGridEnv(gym.Env):
     gridBuyPowerMax = 8.0
     gridSellPowerMax = 8.0
 
-    # Reward scaling: profit is in cents; divide so PPO gradients stay stable
     profitRewardScale = 100.0
     deferMissPenaltyPerJ_cents = 10
 
     @classmethod
     def sun_to_pv_w(cls, sun: float) -> float:
-        """Map recorded sun (0–100) to PV power in watts."""
+        """Map sun reading to PV watts."""
         return float(np.clip((sun / 100.0) * cls.pvPowerMax, 0.0, cls.pvPowerMax))
 
     def __init__(self):
@@ -80,7 +70,6 @@ class SmartGridEnv(gym.Env):
         obs_high = np.array(14 * [1.0], dtype=np.float32)
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
-        # Actions: scAction [-1, 1], defAction [0, 1]
         self.action_space = spaces.Box(
             low=np.array([-1.0, 0.0], dtype=np.float32),
             high=np.array([1.0, 1.0], dtype=np.float32),
@@ -204,7 +193,7 @@ class SmartGridEnv(gym.Env):
         return float(np.clip(voltage, self.supercapMinV, self.supercapMaxV))
 
     def _charge_supercap_from_bus(self, bus_energy_j: float) -> float:
-        """Store η × bus energy; return bus energy actually absorbed."""
+        """Charge from bus energy."""
         if bus_energy_j <= 0.0:
             return 0.0
         cap_space = self.maxSupercapEn - self.supercapEn
@@ -216,7 +205,7 @@ class SmartGridEnv(gym.Env):
         return absorbed
 
     def _discharge_supercap_to_bus(self, bus_energy_j: float) -> float:
-        """Deliver bus energy; remove bus/η from stored usable energy."""
+        """Discharge to bus energy."""
         if bus_energy_j <= 0.0 or self.supercapEn <= 0.0:
             return 0.0
         max_deliver = self.supercapEn * self.scEfficiency
@@ -356,7 +345,6 @@ class SmartGridEnv(gym.Env):
         imported_en = 0.0
         exported_en = 0.0
 
-        # Demand: PV -> SC discharge -> automatic PSU import
         pv_to_demand = min(pv_en, demand_en)
         remaining_demand = demand_en - pv_to_demand
         remaining_pv = pv_en - pv_to_demand
@@ -382,7 +370,6 @@ class SmartGridEnv(gym.Env):
             imported_en += grid_to_demand
             remaining_demand -= grid_to_demand
 
-        # PV surplus: SC charge -> automatic PSU export
         pv_charge_en = 0.0
         if remaining_pv > 0.0 and charge_budget_j > 0.0:
             pv_charge_en = self._charge_supercap_from_bus(

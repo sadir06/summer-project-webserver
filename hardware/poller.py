@@ -40,7 +40,7 @@ def read_hardware(
     *,
     use_last_known: bool = False,
 ) -> dict[str, float | None]:
-    """Poll Picos; parallel requests. Inference uses short timeout + last-known fallback."""
+    """Poll Picos in parallel."""
     t = float(timeout_s if timeout_s is not None else POLL_TIMEOUT_S)
     readings: dict[str, float | None] = {
         "pvout": None,
@@ -87,7 +87,7 @@ def read_hardware(
 
 
 def read_hardware_for_inference() -> dict[str, float | None]:
-    """PV + cap voltage only (no /p power read — grid uses commanded sc_action)."""
+    """PV output and cap voltage for inference."""
     t = float(INFERENCE_PICO_TIMEOUT_S)
     readings: dict[str, float | None] = {"pvout": None, "vcap": None}
 
@@ -122,7 +122,7 @@ def read_hardware_for_inference() -> dict[str, float | None]:
 
 
 def poll_hardware(cache: dict, lock) -> None:
-    """Dashboard poll: pvout + vcap only (no cap /p — avoids hammering Cap Pico)."""
+    """Dashboard poll: pvout and vcap only."""
     readings = read_hardware_for_inference()
     with lock:
         for field, value in readings.items():

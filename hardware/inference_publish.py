@@ -1,4 +1,4 @@
-"""Fire-and-forget publish of inference metrics to the local Flask dashboard."""
+"""Publish inference metrics to the local Flask dashboard."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ _publish_failures = 0
 
 
 def _json_safe(value):
-    """Convert numpy/torch scalars to native Python types for requests JSON encoding."""
+    """Convert numpy scalars for JSON."""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -37,10 +37,7 @@ def estimate_grid_power_w(
     sc_action: float,
     pcout_w: float | None,
 ) -> tuple[float, float, float]:
-    """Return (grid_import_w, grid_export_w, sc_bus_w).
-
-    sc_bus_w > 0 means supercap discharging onto the bus (helps meet load).
-    """
+    """Return grid import, export and supercap bus power (W)."""
     if pcout_w is not None:
         sc_bus_w = float(pcout_w)
     else:
@@ -70,7 +67,7 @@ def _flask_base() -> str:
 
 
 def publish_inference_tick(payload: dict) -> bool:
-    """Single atomic POST — updates load_demand + charts together on Flask."""
+    """POST tick payload to Flask."""
     global _publish_failures
 
     body = _sanitize_payload(payload)

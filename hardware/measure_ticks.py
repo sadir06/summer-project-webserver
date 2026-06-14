@@ -1,11 +1,4 @@
-"""Measure per-endpoint latency over N Azure ticks (inference path only).
-
-Matches live inference I/O: Azure price+demand+deferables, Pico pvout+vcap (/data).
-No sun, no cap /p power read.
-
-Run from repo root:
-  python -m hardware.measure_ticks --ticks 5
-"""
+"""Measure endpoint latency over N Azure ticks."""
 
 from __future__ import annotations
 
@@ -31,7 +24,6 @@ from hardware.poller import read_hardware_for_inference
 TICK_POLL_S = 0.25
 TIMEOUT_S = 1.0
 
-# Same endpoints inference uses after this change
 AZURE_PATHS = ("price", "demand", "deferables")
 PICO_LABELS = ("pvout", "vcap")
 

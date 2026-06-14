@@ -5,7 +5,6 @@ import random
 
 
 class SmartGridEnv(gym.Env):
-    # Supercapacitor physical energy model
     supercapMinV = 10.35
     supercapMaxV = 16.13
     supercapCF = 0.5
@@ -14,14 +13,12 @@ class SmartGridEnv(gym.Env):
     maxPhysicalSupercapEn = 0.5 * supercapCF * (supercapMaxV**2)
     maxSupercapEn = maxPhysicalSupercapEn - minPhysicalSupercapEn
 
-    # Main system limits
     loadDemandMax = 8
     pvPowerMax = 7
 
     tickDur = 5
     ticksPerDay = 60
 
-    # Demand is now treated as a hard constraint
     penaltyBaseDemand = -100
     penaltyDefDemand = -30
     penaltyCapOvUn = -10
@@ -36,7 +33,6 @@ class SmartGridEnv(gym.Env):
     maxScCharge = 3
     maxScDischarge = 3
 
-    # Maximum deferable demand serving power
     maxDefPower = 8
 
     priceLookaheadTicks = 6
@@ -44,19 +40,16 @@ class SmartGridEnv(gym.Env):
     gridBuyPowerMax = 8
     gridSellPowerMax = 8
 
-    # Kept but deliberately ignored in sell logic
     minSellSoc = 0
 
     buyMargin = 0.05
     sellMargin = 0.05
     storageArbitrageMargin = 0.10
 
-    # Reward shaping terms
     pvCurtailmentPenalty = 0.05
     balancePenalty = 0.01
     actionSmoothPenalty = 0.02
 
-    # PV is sampled independently (not derived from irradiance/sun).
     pvGenMean = 3.5
     pvGenStd = 2.0
 
@@ -75,7 +68,6 @@ class SmartGridEnv(gym.Env):
         power = rng.gauss(cls.pvGenMean, cls.pvGenStd)
         return float(np.clip(power, 0.0, cls.pvPowerMax))
 
-    # Environment setup
     def __init__(self):
         super().__init__()
         obsLow = np.array(
@@ -101,7 +93,6 @@ class SmartGridEnv(gym.Env):
         self.obsSpace = spaces.Box(low=obsLow, high=obsHigh, dtype=np.float32)
         self.observation_space = self.obsSpace
 
-        # Actions: gridAction, scAction, defAction
         self.actionSpace = spaces.Box(
             low=np.array([-1.0, -1.0, 0.0], dtype=np.float32),
             high=np.array([1.0, 1.0, 1.0], dtype=np.float32),
@@ -125,7 +116,6 @@ class SmartGridEnv(gym.Env):
             "defDemandState": [],
         }
 
-    # Reset one simulated day
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.seededRandom = random.Random(
@@ -191,7 +181,6 @@ class SmartGridEnv(gym.Env):
         info = self.getInfo()
         return obs, info
 
-    # Look ahead at future price and net energy
     def getPriceProjection(self):
         startTick = self.curTick
         endTick = min(self.ticksPerDay, self.curTick + self.priceLookaheadTicks)
@@ -223,7 +212,6 @@ class SmartGridEnv(gym.Env):
             projectedFutureNetEn,
         )
 
-    # Decide whether to buy cheap grid energy for storage
     def shouldBuyForStorage(self, buyPrice, avgFutureBuy, maxFutureSell):
         capSpace = self.maxSupercapEn - self.supercapEn
         if capSpace <= 0.0:
@@ -234,7 +222,6 @@ class SmartGridEnv(gym.Env):
         )
         return cheapComparedToFutureBuy or profitableFutureExport
 
-    # Decide whether to sell stored energy
     def shouldSellFromStorage(
         self, sellPrice, avgFutureSell, avgFutureBuy, projectedFutureNetEn
     ):
@@ -247,7 +234,6 @@ class SmartGridEnv(gym.Env):
             betterThanFutureBuyValue or futureLooksComfortable
         )
 
-    # Decide whether deferable demand should be served this tick
     def shouldServeDeferrableNow(self, dd, buyPrice):
         if dd["remainingEn"] <= 0.0:
             return False
@@ -266,17 +252,14 @@ class SmartGridEnv(gym.Env):
         priceIsReasonable = buyPrice <= avgRemainingPrice
         return priceIsReasonable or mustServeNow
 
-    # Convert usable supercap energy into physical energy
     def getSupercapPhysicalEnergy(self):
         return self.minPhysicalSupercapEn + self.supercapEn
 
-    # Estimate supercap voltage from stored energy
     def getSupercapVoltage(self):
         physicalEnergy = self.getSupercapPhysicalEnergy()
         voltage = np.sqrt((2.0 * physicalEnergy) / self.supercapCF)
         return float(np.clip(voltage, self.supercapMinV, self.supercapMaxV))
 
-    # Build observation vector
     def getObs(self):
         dataTick = min(self.curTick, self.ticksPerDay - 1)
         pvGen = self.dailyData["pvGen"][dataTick]
@@ -338,7 +321,6 @@ class SmartGridEnv(gym.Env):
         )
         return np.clip(obs, self.observation_space.low, self.observation_space.high)
 
-    # Build debug information dictionary
     def getInfo(self):
         dataTick = min(self.curTick, self.ticksPerDay - 1)
         (
@@ -378,7 +360,6 @@ class SmartGridEnv(gym.Env):
         }
         return info
 
-    # Run one environment tick
     def step(self, action):
         if self.curTick >= self.ticksPerDay:
             obs = self.getObs()
@@ -427,7 +408,6 @@ class SmartGridEnv(gym.Env):
         unmetBaseDemand = 0.0
         unmetDefDemand = 0.0
 
-        # Demand is supplied first: PV -> supercap -> grid
         pvToDemand = min(pvEn, demandEn)
         remainingDemand = demandEn - pvToDemand
         remainingPv = pvEn - pvToDemand
@@ -458,7 +438,6 @@ class SmartGridEnv(gym.Env):
             self.totalUnmetBaseDemand += unmetBaseDemand
             self.totalUnmetDefDemand += unmetDefDemand
 
-        # After demand is satisfied, optionally charge supercap using PV surplus
         pvChargeEn = 0.0
         scPenalty = 0.0
         if remainingPv > 0.0 and scAction > 0.0:
@@ -470,7 +449,6 @@ class SmartGridEnv(gym.Env):
             if pvChargeEn < min(requestedScCharge, remainingPv + pvChargeEn):
                 scPenalty += self.penaltyCapOvUn
 
-        # Buy cheap grid energy into storage only after this tick demand is met
         boughtForStorage = False
         if self.shouldBuyForStorage(buyPrice, avgFutureBuy, maxFutureSell) and (
             scAction > -0.2 or self.supercapEn < 0.2 * self.maxSupercapEn
@@ -486,7 +464,6 @@ class SmartGridEnv(gym.Env):
             importedEn += actualBuyStoreEn
             boughtForStorage = actualBuyStoreEn > 0.0
 
-        # Export any remaining PV surplus according to grid action
         exportedSurplusEn = 0.0
         if remainingPv > 0.0:
             if gridAction < 0.0:
@@ -500,7 +477,6 @@ class SmartGridEnv(gym.Env):
                 exportedEn += exportedSurplusEn
             curtailedPvEn = max(0.0, remainingPv - exportedSurplusEn)
 
-        # Sell from storage only after demand is already satisfied
         if (not boughtForStorage) and self.shouldSellFromStorage(
             sellPrice, avgFutureSell, avgFutureBuy, projectedFutureNetEn
         ):

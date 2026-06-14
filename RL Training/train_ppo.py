@@ -14,7 +14,7 @@ from networks import PolicyNet, ValueNet
 RL_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = RL_DIR.parent
 
-OBS_DIM = 14  # default; prototype 4 uses env.obsDim (21)
+OBS_DIM = 14
 
 TOTAL_UPDATES = 500
 EPISODES_PER_ROLLOUT = 32

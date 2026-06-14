@@ -1,5 +1,5 @@
 /**
- * Live inference charts — fed from /api/state → inference.ticks
+ * Live inference charts from /api/state inference.ticks
  */
 window.InferenceCharts = (function () {
   const charts = {

@@ -1,15 +1,4 @@
-"""Evaluate a trained policy on the held-out test days (20% split).
-
-Runs full 60-tick rollouts per day using deterministic policy mean actions.
-Reports per-day and total profit in cents, plus timing breakdown.
-
-Does not touch live hardware or inference.py.
-
-Example:
-  cd "RL Training"
-  python eval_test_set.py --prototype 3
-  python eval_test_set.py --prototype 3 --checkpoint checkpoints/prototype_3/policy_latest.pth
-"""
+"""Evaluate a trained policy on held-out test days."""
 
 from __future__ import annotations
 

@@ -7,20 +7,15 @@ from price_obs import compute_price_momentum, cross_day_features_at_tick
 
 
 class SmartGridEnv(gym.Env):
-    """Prototype 4: proto3 + SC voltage-limit penalty, hardware efficiencies (SC/grid/load)."""
-
-    # Supercapacitor physical model (hardware voltage limits)
     supercapMinV = 10.25
     supercapMaxV = 16.0
     supercapCF = 0.65
-    scEfficiency = 0.77  # measured hardware round-trip efficiency
+    scEfficiency = 0.77
 
-    # Grid PSU (bidirectional): step η on |P_bus| (W); import metered = E_bus/η, export credit = E_bus×η
     gridEfficiencyLow = 0.55
     gridEfficiencyHigh = 0.90
     gridEfficiencyPowerThresholdW = 0.5
 
-    # Load converter: measured η vs load power (W); bus draw = E_load/η_load(P)
     _LOAD_EFF_POWER_W = np.array(
         [0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0],
         dtype=np.float64,
@@ -35,7 +30,6 @@ class SmartGridEnv(gym.Env):
     maxPhysicalSupercapEn = 0.5 * supercapCF * (supercapMaxV**2)
     maxSupercapEn = maxPhysicalSupercapEn - minPhysicalSupercapEn
 
-    # Power limits (watts)
     loadDemandMax = 8.0
     pvPowerMax = 7.0
 
@@ -54,25 +48,20 @@ class SmartGridEnv(gym.Env):
     maxScDischarge = 3.0
     maxDefPower = 8.0
 
-    priceLookaheadTicks = 6  # history window length (past ticks only; no future oracle)
-    crossDayHistoryDays = 7  # same-tick stats from prior completed days (A)
-    priceMomentumTicks = 6  # intraday Δprice lookback (C)
+    priceLookaheadTicks = 6
+    crossDayHistoryDays = 7
+    priceMomentumTicks = 6
 
-    # obs: 14 base + 3 cross-day + 4 momentum = 21
     obsDim = 21
 
     gridBuyPowerMax = 8.0
     gridSellPowerMax = 8.0
 
     profitRewardScale = 100.0
-    # Must dominate tick profit so agent never skips defer (typical task ~37 J, max 50 J)
     deferMissPenaltyPerJ_cents = 200
-    # Penalty for commanding SC past voltage limits (cents per J of wasted request)
     scLimitPenaltyPerJ_cents = 15.0
     scLimitActionThreshold = 0.05
     voltageLimitEpsilonV = 0.02
-
-    # PV: uniform random per tick in [0, pvPowerMax] W (lab demo; not derived from sun)
 
     @classmethod
     def samplePvPower(cls, rng: random.Random) -> float:
@@ -106,14 +95,14 @@ class SmartGridEnv(gym.Env):
         )
 
     def _meter_grid_import(self, bus_energy_j: float) -> float:
-        """Bus J delivered from grid → metered J billed (E_grid = E_bus / η)."""
+        """Metered import joules from bus joules."""
         if bus_energy_j <= 0.0:
             return 0.0
         p_bus = bus_energy_j / self.tickDur
         return bus_energy_j / self.grid_efficiency(p_bus)
 
     def _credit_grid_export(self, bus_energy_j: float) -> float:
-        """Bus J sent to grid → metered J credited (E_credit = E_bus × η)."""
+        """Metered export joules from bus joules."""
         if bus_energy_j <= 0.0:
             return 0.0
         p_bus = bus_energy_j / self.tickDur
@@ -244,7 +233,7 @@ class SmartGridEnv(gym.Env):
         return self.getObs(), self.getInfo()
 
     def getPriceProjection(self):
-        """Rolling window over past ticks only (no future prices/PV/demand)."""
+        """Past tick window only."""
         end_tick = self.curTick + 1
         start_tick = max(0, end_tick - self.priceLookaheadTicks)
         data_tick = min(self.curTick, self.ticksPerDay - 1)
@@ -298,7 +287,7 @@ class SmartGridEnv(gym.Env):
         return delivered
 
     def _sc_limit_wasted_j(self, sc_action: float, voltage: float) -> float:
-        """Joules of SC action that hardware would reject (already at min/max V)."""
+        """Rejected SC command joules at voltage limits."""
         wasted = 0.0
         if sc_action < -self.scLimitActionThreshold and self.is_at_min_voltage(voltage):
             wasted += abs(sc_action) * self.maxScDischarge * self.tickDur
@@ -551,8 +540,6 @@ class SmartGridEnv(gym.Env):
 
         missed_def_j = self._defer_deadline_penalty_j()
 
-        # Profit: imported_en / exported_en are METERED (grid-billed) joules after η.
-        # Bus dispatch uses bus_demand_en (load_terminal/η_load), SC actual J, grid η on transfers.
         actual_sc_discharge_bus_j = sc_to_demand + sc_to_grid
         actual_sc_charge_bus_j = pv_charge_en + grid_to_sc
 

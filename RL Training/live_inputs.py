@@ -22,7 +22,7 @@ def effective_sc_action_for_voltage(
     vcap_v: float | None,
     env_class,
 ) -> float:
-    """Clip SC command when hardware is already at min/max voltage (proto 4+ live profit)."""
+    """Clip SC command at voltage limits."""
     if vcap_v is None:
         return float(sc_action)
     eps = getattr(env_class, "voltageLimitEpsilonV", 0.02)
@@ -50,7 +50,7 @@ def parse_deferables(deferables_raw: list[dict]) -> list[dict]:
 
 
 def _price_obs_norm(env_class, buy_price_raw: float, sell_price_raw: float) -> tuple[float, float]:
-    """Map raw cloud cents/J to observation normalisation used by the env."""
+    """Normalise raw cloud prices for the observation vector."""
     if hasattr(env_class, "maxBuyPriceObs"):
         return (
             float(buy_price_raw) / env_class.maxBuyPriceObs,
@@ -88,7 +88,7 @@ class DaySeriesBuffer:
         }
 
     def get_price_projection(self, cur_tick: int, env_class) -> tuple[float, float, float, float, float]:
-        """Rolling window over ticks seen so far today (no future oracle)."""
+        """Rolling price window for ticks seen today."""
         end_tick = cur_tick + 1
         start_tick = max(0, end_tick - env_class.priceLookaheadTicks)
         data_tick = min(cur_tick, env_class.ticksPerDay - 1)
@@ -279,7 +279,7 @@ def total_deferrable_energy(defer_state: list[dict]) -> float:
 
 
 def defer_headroom_w(instant_demand_w: float, *, load_max_w: float = 8.0) -> float:
-    """Load cap 8 W/tick: instant is served first; defer gets only the remainder."""
+    """Headroom below 8 W after instant demand."""
     return max(0.0, float(load_max_w) - float(instant_demand_w))
 
 
@@ -291,7 +291,7 @@ def compute_defer_power_served_w(
     *,
     load_max_w: float = 8.0,
 ) -> float:
-    """Defer power actually served this tick (capped by 8W − instant and remaining defer J)."""
+    """Defer power served this tick."""
     headroom = defer_headroom_w(instant_demand_w, load_max_w=load_max_w)
     requested_w = float(def_action) * headroom
     available_w = total_deferrable_energy(defer_state) / tick_dur_s
@@ -306,7 +306,7 @@ def compute_pico_demand_power(
     *,
     load_max_w: float = 8.0,
 ) -> float:
-    """Total load power = instant (always) + defer served (≤ headroom below load_max_w)."""
+    """Total load power (instant plus defer)."""
     defer_power = compute_defer_power_served_w(
         instant_demand,
         defer_state,

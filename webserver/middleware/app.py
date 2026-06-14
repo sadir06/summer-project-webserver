@@ -48,7 +48,6 @@ def get_inference_run():
 
 
 def _apply_inference_tick(data: dict) -> None:
-    """Atomically update in-memory dashboard + load cache (must be synchronous)."""
     data.setdefault("ts", time.time())
     append_inference_tick(data)
     total_w = data.get("total_demand_w", data.get("total_demand"))
@@ -77,7 +76,6 @@ def post_inference_tick():
 
 @app.route("/api/load_demand", methods=["GET", "POST"])
 def load_demand():
-    """Load Pico polls GET; inference POSTs full tick payload here or on /api/inference_tick."""
     if request.method == "POST":
         data = request.get_json(force=True, silent=True) or {}
         if data.get("tick_profit_cents") is not None:

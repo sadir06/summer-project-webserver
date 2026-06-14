@@ -37,7 +37,7 @@ def send_action(name: str, value: float, *, timeout_s: float | None = None) -> b
 
 
 def send_load_demand(*, day: int, tick: int, total_demand_w: float) -> bool:
-    """Optional POST to Load Pico. Flask mirror is done via publish_inference_tick()."""
+    """Optional POST to the load Pico."""
     if not LOAD_DEMAND_POST_ENABLED:
         return True
 
@@ -65,11 +65,9 @@ def send_actions(
     grid_action: float | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, bool]:
-    """Send supercap (and optional grid) actions directly to Picos."""
+    """Send supercap and optional grid actions to the Picos."""
     if not ACTIONS_ENABLED:
-        print(
-            "actions skipped (ACTIONS_ENABLED=False; Pico firmware has no GET /action yet)"
-        )
+        print("actions skipped (ACTIONS_ENABLED=False)")
         results = {"sc": False}
         if grid_action is not None:
             results["grid"] = False

@@ -24,7 +24,7 @@ Your phone may show a **public** IP on the internet (e.g. `104.28.89.52`). That 
 
 | IP type | Example | Used for |
 |---------|---------|----------|
-| Public (cellular/WAN) | `104.28.89.52` | Internet-facing only — **ignore for Pico/laptop config** |
+| Public (cellular/WAN) | `104.28.89.52` | Not used for Pico/laptop config |
 | Local hotspot gateway | Often `172.20.10.1` or `192.168.x.1` | Wi-Fi gateway on your laptop |
 | Laptop (static) | `172.20.10.3` | Flask + what Picos poll |
 | Pico (DHCP) | e.g. `172.20.10.5`, `.8` | `PICO_URL_PV`, `PICO_URL_CP` in config |
@@ -67,10 +67,10 @@ Do **not** put the laptop IP in `PICO_URL_PV`.
 ## Run order
 
 ```powershell
-# Terminal 1 — required for MPPT Pico
+# Terminal 1: Flask
 python -m webserver.middleware.app
 
-# Terminal 2 — RL inference
+# Terminal 2: inference
 cd "RL Training"
 python inference.py
 ```

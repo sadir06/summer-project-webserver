@@ -1,4 +1,4 @@
-# Prototype 2 — Model Behaviour & Evaluation
+# Prototype 2: model behaviour and evaluation
 
 **Checkpoint:** `RL Training/checkpoints/prototype_2/policy_final.pth` (500 PPO updates)  
 **Environment:** `env4_prototype_2.py`  

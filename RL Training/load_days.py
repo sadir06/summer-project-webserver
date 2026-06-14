@@ -26,7 +26,7 @@ def load_ticks_jsonl(path: Path) -> list[dict]:
 
 
 def group_complete_days(rows: list[dict]) -> dict[int, list[dict]]:
-    """Keep only days with every tick 0..59 present (drop partial head/tail days)."""
+    """Complete days only (ticks 0..59)."""
     grouped = defaultdict(list)
     for row in rows:
         grouped[row["day"]].append(row)

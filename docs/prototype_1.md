@@ -1,4 +1,4 @@
-# Prototype 1 — Model Behaviour & Arbitrage Findings
+# Prototype 1: model behaviour and arbitrage findings
 
 **Checkpoint:** `RL Training/checkpoints/prototype_1/policy_final.pth` (500 PPO updates)  
 **Evaluation:** Full held-out test set via `inference.py --prototype 1` + `env4.SmartGridEnv` rollouts  
@@ -58,7 +58,7 @@ The policy has collapsed to a corner of the action space: *"import everything, d
 
 ---
 
-## Hardcoded arbitrage — how it interacts with the policy
+## Hardcoded arbitrage and the policy
 
 Arbitrage is **not** an agent action. It is applied inside `env4.step()` by merging arb buy/sell energy into the same supercap delta as the agent's `scAction`:
 
@@ -68,8 +68,8 @@ requestedScDelta = agentScDelta + arbBuyEn − arbSellEn
 
 Attribution rules:
 
-- **Arb import** (`arbitrageImportEn`): only when net SC delta is **positive** (charging) *and* `shouldBuyForStorage()` — buy price < 95% of average future buy price, with cap headroom.
-- **Arb export** (`arbitrageExportEn`): only when net SC delta is **negative** (discharging) *and* `shouldSellFromStorage()` — sell price > 105% of average future sell *and* projected future net demand is non-negative, *and* arb buy is not also wanted.
+- **Arb import** (`arbitrageImportEn`): only when net SC delta is **positive** (charging) *and* `shouldBuyForStorage()` (buy price below 95% of average future buy price, with cap headroom).
+- **Arb export** (`arbitrageExportEn`): only when net SC delta is **negative** (discharging) *and* `shouldSellFromStorage()` (sell price above 105% of average future sell, projected future net demand is non-negative, and arb buy is not also wanted).
 
 Arbitrage also receives a small fixed reward bonus (+0.5 per import/export tick) that the agent does not directly control.
 
@@ -90,7 +90,7 @@ Because the agent **always** requests max SC discharge, arbitrage buy logic only
 
 On the remaining ~44 ticks, agent discharge dominates: arbitrage cannot charge the cap even when buy prices are favourable. Arb export fires on ~4 ticks per day when sell is favourable, future demand looks comfortable, and buy arb is not active.
 
-**Net effect:** Arbitrage partially leaks through on cheap ticks but is largely **suppressed** by the policy's discharge saturation. Mean end-of-day supercap energy is **~5.3 J** (starts at 0), accumulated by arb overriding discharge intent — not because the agent learned to store energy.
+**Net effect:** Arbitrage partially leaks through on cheap ticks but is largely **suppressed** by the policy's discharge saturation. Mean end-of-day supercap energy is **~5.3 J** (starts at 0), accumulated by arb overriding discharge intent, not because the agent learned to store energy.
 
 ---
 
@@ -110,8 +110,8 @@ On the remaining ~44 ticks, agent discharge dominates: arbitrage cannot charge t
 
 | Area | Finding | Suggested direction |
 |------|---------|---------------------|
-| Reliability | Strong — 0 unmet on full test set | Keep penalty structure or add hard constraint metric |
-| Economics | Failed — 0/229 days beat naive on profit | Add/normalise cost term; consider Lagrangian budget on import |
+| Reliability | Strong (0 unmet on full test set) | Keep penalty structure or add hard constraint metric |
+| Economics | Failed (0/229 days beat naive on profit) | Add/normalise cost term; consider Lagrangian budget on import |
 | Arbitrage | Runs but undermined by SC discharge policy | Decouple arb from agent SC actuator (`env4_prototype_2.py`) |
 | Action collapse | All actions saturated | Entropy bonus tuning, action noise at train time, or reward scaling review |
 | Evaluation | `inference.py` is single-tick demo | Use full-day rollouts for regression checks |

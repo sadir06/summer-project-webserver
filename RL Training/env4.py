@@ -5,7 +5,6 @@ import random
 
 
 class SmartGridEnv(gym.Env):
-    # Supercapacitor physical energy model
     supercapMinV = 10.35
     supercapMaxV = 16.13
     supercapCF = 0.5
@@ -14,14 +13,12 @@ class SmartGridEnv(gym.Env):
     maxPhysicalSupercapEn = 0.5 * supercapCF * (supercapMaxV ** 2)
     maxSupercapEn = maxPhysicalSupercapEn - minPhysicalSupercapEn
 
-    # Main system limits
     loadDemandMax = 8
     pvPowerMax = 7
 
     tickDur = 5
     ticksPerDay = 60
 
-    # Separate demand penalties
     penaltyBaseDemand = -100
     penaltyDefDemand = -30
     penaltyCapOvUn = -10
@@ -35,7 +32,6 @@ class SmartGridEnv(gym.Env):
     maxScCharge = 3
     maxScDischarge = 3
 
-    # Maximum deferable demand serving power
     maxDefPower = 8
 
     priceLookaheadTicks = 6
@@ -43,18 +39,15 @@ class SmartGridEnv(gym.Env):
     gridBuyPowerMax = 8
     gridSellPowerMax = 8
 
-    # Kept but deliberately ignored in sell logic
     minSellSoc = 0
 
     buyMargin = 0.05
     sellMargin = 0.05
 
-    # Reward shaping terms
     pvCurtailmentPenalty = 0.05
     balancePenalty = 0.01
     actionSmoothPenalty = 0.02
 
-    # PV cell noise (irradiance -> V/I -> power is not deterministic)
     pvNoiseStd = 0.08
 
     @staticmethod
@@ -80,7 +73,6 @@ class SmartGridEnv(gym.Env):
         power = cls.pvPowerMax * p_norm * noise
         return float(np.clip(power, 0.0, cls.pvPowerMax))
 
-    # Environment setup
     def __init__(self):
         super().__init__()
 
@@ -110,7 +102,6 @@ class SmartGridEnv(gym.Env):
         )
         self.observation_space = self.obsSpace
 
-        # Actions: gridAction, scAction, defAction
         self.actionSpace = spaces.Box(
             low=np.array([-1.0, -1.0, 0.0], dtype=np.float32),
             high=np.array([1.0, 1.0, 1.0], dtype=np.float32),
@@ -136,7 +127,6 @@ class SmartGridEnv(gym.Env):
             "defDemandState": []
         }
 
-    # Reset one simulated day
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -216,7 +206,6 @@ class SmartGridEnv(gym.Env):
 
         return obs, info
 
-    # Look ahead at future price and net energy
     def getPriceProjection(self):
         startTick = self.curTick
         endTick = min(self.ticksPerDay, self.curTick + self.priceLookaheadTicks)
@@ -253,7 +242,6 @@ class SmartGridEnv(gym.Env):
             projectedFutureNetEn
         )
 
-    # Decide whether to buy cheap grid energy for storage
     def shouldBuyForStorage(self, buyPrice, avgFutureBuy):
         capSpace = self.maxSupercapEn - self.supercapEn
 
@@ -263,7 +251,6 @@ class SmartGridEnv(gym.Env):
         favourableBuyPrice = buyPrice < (avgFutureBuy * (1.0 - self.buyMargin))
         return favourableBuyPrice
 
-    # Decide whether to sell stored energy
     def shouldSellFromStorage(self, sellPrice, avgFutureSell, projectedFutureNetEn):
         if self.supercapEn <= 0.0:
             return False
@@ -273,7 +260,6 @@ class SmartGridEnv(gym.Env):
 
         return favourableSellPrice and futureLooksComfortable
 
-    # Decide whether deferable demand should be served this tick
     def shouldServeDeferrableNow(self, dd, buyPrice):
         if dd["remainingEn"] <= 0.0:
             return False
@@ -298,11 +284,9 @@ class SmartGridEnv(gym.Env):
 
         return priceIsReasonable or mustServeNow
 
-    # Convert usable supercap energy into physical energy
     def getSupercapPhysicalEnergy(self):
         return self.minPhysicalSupercapEn + self.supercapEn
 
-    # Estimate supercap voltage from stored energy
     def getSupercapVoltage(self):
         physicalEnergy = self.getSupercapPhysicalEnergy()
         voltage = np.sqrt((2.0 * physicalEnergy) / self.supercapCF)
@@ -313,7 +297,6 @@ class SmartGridEnv(gym.Env):
             self.supercapMaxV
         ))
 
-    # Build observation vector
     def getObs(self):
         dataTick = min(self.curTick, self.ticksPerDay - 1)
 
@@ -390,7 +373,6 @@ class SmartGridEnv(gym.Env):
             self.observation_space.high
         )
 
-    # Build debug information dictionary
     def getInfo(self):
         dataTick = min(self.curTick, self.ticksPerDay - 1)
 
@@ -434,7 +416,6 @@ class SmartGridEnv(gym.Env):
 
         return info
 
-    # Run one environment tick
     def step(self, action):
         if self.curTick >= self.ticksPerDay:
             obs = self.getObs()

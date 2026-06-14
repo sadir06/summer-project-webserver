@@ -78,7 +78,7 @@ def _check_no_tick_skip(
 
 
 def _fetch_inputs_for_tick() -> tuple[dict, dict]:
-    """Parallel Azure snapshot + fast Pico poll (wall time ≈ max of the two)."""
+    """Parallel Azure snapshot and Pico poll."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         cloud_future = pool.submit(fetch_cloud_snapshot)
         hardware_future = pool.submit(read_hardware_for_inference)
@@ -89,7 +89,7 @@ def _wait_and_fetch_inputs(
     last_tick: int | None,
     last_day: int | None,
 ) -> tuple[dict, dict, float, float]:
-    """Wait for Azure tick advance, then fetch snapshot+hardware immediately (one tick)."""
+    """Wait for Azure tick advance, then fetch inputs."""
     wait_start = time.perf_counter()
     while True:
         try:
@@ -203,7 +203,6 @@ def clip_action(raw_action: np.ndarray, prototype: int) -> np.ndarray:
         action[0] = np.clip(action[0], -1.0, 1.0)
         action[1] = np.clip((action[1] + 1.0) / 2.0, 0.0, 1.0)
         return action
-    # Prototype 2: only negative grid_action exports PV surplus; +1 does nothing.
     action[0] = np.clip(action[0], -1.0, 0.0)
     action[1] = np.clip(action[1], -1.0, 1.0)
     action[2] = np.clip((action[2] + 1.0) / 2.0, 0.0, 1.0)
@@ -529,7 +528,7 @@ def run_live(args, env_class, device: torch.device) -> None:
             )
             _fatal_tick_sync(
                 f"tick {tick_i} fetch+infer+flask took {work_ms:.0f}ms "
-                f"(budget {budget_ms:.0f}ms) — would skip next Azure tick"
+                f"(budget {budget_ms:.0f}ms); would skip next Azure tick"
             )
 
         print(

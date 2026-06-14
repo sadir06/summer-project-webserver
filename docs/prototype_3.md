@@ -1,4 +1,4 @@
-# Prototype 3 — Profit-Driven Arbitrage (**frozen — profitable on H100**)
+# Prototype 3: profit-driven arbitrage (frozen)
 
 **Environment:** `RL Training/env4_prototype_3.py` (frozen; do not edit)  
 **Checkpoint dir:** `RL Training/checkpoints/prototype_3/`  

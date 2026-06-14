@@ -1,6 +1,3 @@
-# JS cannot directly read from the web server, so we poll Azure + Pico boards in Python
-# and pass the merged cache to the frontend via Flask.
-
 import time
 from datetime import datetime, timezone
 

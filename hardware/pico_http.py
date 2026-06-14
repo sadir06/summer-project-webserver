@@ -1,4 +1,4 @@
-"""HTTP to Pico boards — Cap Pico is single-threaded; serialize + Connection: close."""
+"""HTTP to Pico boards. Cap Pico requests are serialized."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _is_cap_host(base_url: str) -> bool:
 
 
 def pico_get(url: str, *, cap_host: bool = False, **kwargs) -> object:
-    """GET with Connection: close; Cap host requests are serialized (one at a time)."""
+    """GET with Connection: close; cap host requests are serialized."""
     headers = {**_CLOSE, **kwargs.pop("headers", {})}
     if cap_host:
         with _cap_lock:

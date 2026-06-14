@@ -1,4 +1,4 @@
-# Prototype 4 — Hardware efficiencies + SC voltage-limit penalty
+# Prototype 4: hardware efficiencies and SC voltage-limit penalty
 
 **Environment:** `RL Training/env4_prototype_4.py`  
 **Checkpoint dir:** `RL Training/checkpoints/prototype_4/`
@@ -64,7 +64,7 @@ reward = tick_profit_cents / 100 − defer_miss_penalty − sc_limit_penalty
 defer_miss_penalty = missed_J × 200 cents/J / 100   # was 10; must beat grid profit
 ```
 
-Typical defer task is **~37 J** (max 50 J). Missing one full task ≈ **−100 reward**, comparable to a full day of grid profit in reward units — agent cannot ignore defer.
+Typical defer task is **~37 J** (max 50 J). Missing one full task costs about a full day of grid profit in reward units.
 
 Log columns: `def_done` (tasks served / 3), `def_missed` (tasks missed / day), `profit` (grid only, excludes defer penalties).
 
@@ -74,12 +74,12 @@ From `data_collection/data/ticks.jsonl` (80/20 split, seed 42):
 
 | Field | Source |
 |-------|--------|
-| **PV** | Uniform random **[0, 7] W** per tick — **not** from `sun` |
+| **PV** | Uniform random **[0, 7] W** per tick, not from `sun` |
 | **Demand** | `demand` from ticks (instant load, W) |
 | **Prices** | Raw `buy_price` / `sell_price` (cents/J); profit uses E = P × 5 s |
 | **Deferables** | `energy`, `start`, `end` from tick 0 row |
 
-Obs price features (dims 11–12, 14): rolling mean over **past** 6 ticks only — no future oracle.
+Obs price features (dims 11–12, 14): rolling mean over **past** 6 ticks only, no future oracle.
 
 **Extended obs (dims 15–21, prototype 4 only):**
 
@@ -108,4 +108,4 @@ python eval_test_set.py --prototype 4
 
 ## Next (discussion)
 
-Arbitrage improvements now that efficiencies match hardware — see training logs / team notes.
+Arbitrage improvements now that efficiencies match hardware (see training logs).

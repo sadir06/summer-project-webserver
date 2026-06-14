@@ -22,7 +22,7 @@ def fetch_cloud_tick_day() -> tuple[int | None, int | None]:
 
 
 def fetch_cloud_snapshot() -> dict:
-    """Fetch Azure inputs for inference (price, demand, deferables — no sun)."""
+    """Fetch price, demand and deferables for inference."""
     timeout_s = CLOUD_SNAPSHOT_TIMEOUT_S
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         price_f = pool.submit(_fetch_json, "price", timeout_s=timeout_s)
